@@ -14,7 +14,9 @@ import {
   Zap,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
-import { APP_NAME, PHASE_LABEL } from "../../types";
+import { APP_NAME } from "../../types";
+import { useMarkets } from "../../market/store";
+import { formatLastUpdated } from "../../market/freshness";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
@@ -47,7 +49,7 @@ function Logo({ collapsed = false }: { collapsed?: boolean }) {
             {APP_NAME}
           </span>
           <span className="block text-[10px] font-semibold tracking-[0.18em] text-cyan-300/80 uppercase">
-            {PHASE_LABEL}
+            Phase 2 · Live
           </span>
         </span>
       )}
@@ -101,9 +103,20 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
 export default function AppLayout() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const location = useLocation();
+  const { status, updatedAt, markets } = useMarkets();
   const active = NAV.find((n) =>
     n.end ? location.pathname === n.to : location.pathname.startsWith(n.to.split("/").slice(0, 2).join("/"))
   );
+  const statusDot =
+    status === "live" ? "bg-emerald-400" : status === "stale" ? "bg-amber-400" : status === "error" ? "bg-rose-400" : "bg-slate-500";
+  const statusText =
+    status === "live"
+      ? `${active?.label ?? "CryptoIn"} · LIVE · ${markets.length} markets`
+      : status === "stale"
+        ? `${active?.label ?? "CryptoIn"} · DATA STALE`
+        : status === "error"
+          ? `${active?.label ?? "CryptoIn"} · DATA ERROR`
+          : `${active?.label ?? "CryptoIn"} · Loading…`;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 lg:flex">
@@ -112,20 +125,20 @@ export default function AppLayout() {
         <div className="px-4 pt-5 pb-4">
           <Logo />
         </div>
-        <div className="mx-4 mb-3 rounded-xl border border-amber-400/20 bg-amber-400/[0.06] px-3 py-2.5">
-          <p className="text-[11px] font-bold tracking-widest text-amber-300 uppercase">
-            Demo mode
+        <div className="mx-4 mb-3 rounded-xl border border-emerald-400/20 bg-emerald-400/[0.06] px-3 py-2.5">
+          <p className="text-[11px] font-bold tracking-widest text-emerald-300 uppercase">
+            Live market data
           </p>
           <p className="mt-0.5 text-[11px] leading-snug text-slate-400">
-            No real-money trading. Live data connects in Phase 2.
+            Public Hyperliquid feed. No real-money trading.
           </p>
         </div>
         <div className="flex-1 overflow-y-auto px-3 pb-4">
           <NavList />
         </div>
         <div className="border-t border-slate-800/80 p-4 text-[11px] leading-relaxed text-slate-500">
-          <p className="font-semibold text-slate-400">Foundation build</p>
-          <p>React · TS · Vite · Tailwind · Recharts</p>
+          <p className="font-semibold text-slate-400">Phase 2 · Live data</p>
+          <p>React · TS · Vite · Tailwind · Hyperliquid</p>
           <p className="mt-1">Paper only. Educational use.</p>
         </div>
       </aside>
@@ -152,7 +165,7 @@ export default function AppLayout() {
               <NavList onNavigate={() => setDrawerOpen(false)} />
             </div>
             <p className="pt-3 text-[11px] text-slate-500">
-              Demo mode · No real-money trading
+              Live Hyperliquid data · No real-money trading
             </p>
           </div>
         </div>
@@ -174,12 +187,15 @@ export default function AppLayout() {
               <Logo />
             </div>
             <div className="ml-auto flex items-center gap-2">
-              <span className="hidden items-center gap-2 rounded-full border border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-400 sm:inline-flex">
-                <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
-                {active?.label ?? "CryptoIn"} · Waiting for market data
+              <span
+                className="hidden items-center gap-2 rounded-full border border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-400 sm:inline-flex"
+                title={formatLastUpdated(updatedAt)}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${statusDot}`} />
+                {statusText}
               </span>
-              <span className="inline-flex items-center rounded-full border border-amber-400/30 bg-amber-400/10 px-2.5 py-1 text-[10px] font-bold tracking-widest text-amber-300">
-                DEMO
+              <span className="inline-flex items-center rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-bold tracking-widest text-emerald-300">
+                {status === "live" ? "LIVE" : status === "stale" ? "STALE" : status.toUpperCase()}
               </span>
             </div>
           </div>
@@ -189,7 +205,7 @@ export default function AppLayout() {
         <main className="mx-auto w-full max-w-[1200px] flex-1 px-4 pt-6 pb-24 sm:px-6 lg:pb-10">
           <Outlet />
           <footer className="mt-10 border-t border-slate-800/70 pt-4 pb-2 text-[11px] text-slate-600">
-            CryptoIn AI Signal · Phase 1 foundation · Educational demo. Not financial
+            CryptoIn AI Signal · Phase 2 live Hyperliquid data · Educational demo. Not financial
             advice. No real-money trading.
           </footer>
         </main>
