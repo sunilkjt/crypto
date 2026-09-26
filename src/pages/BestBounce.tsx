@@ -13,13 +13,13 @@ export default function BestBounce() {
       <PageHeader
         title="BEST BOUNCE"
         description="Scanning for potential crypto bounce setups using support, momentum, volume and multi-timeframe confirmation."
-        right={<DemoBadge label="SCANNER OFFLINE" />}
+        right={<DemoBadge label="ENGINE OFFLINE" />}
       />
 
       <Card>
         <CardHeader
           title="How the bounce scanner will work"
-          subtitle="Phase 1 explains logic — Phase 2 connects live scoring"
+          subtitle="Live market data is connected — ranked scoring arrives in a later phase"
         />
         <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-4">
           {PILLARS.map((p, i) => (
@@ -39,8 +39,8 @@ export default function BestBounce() {
         <CardHeader title="Live Setups" subtitle="Ranked bounce candidates" />
         <EmptyState
           title="No live setups yet."
-          message="Once support holds, momentum turns, volume confirms and higher timeframes agree, ranked LONG bounce setups will list here. No invented setups in foundation mode."
-          hint="Engine status: offline · Phase 2 planned"
+          message="Bounce ranking needs support, momentum, volume and multi-timeframe scoring, which is not built yet. Market data underneath is live — check the Scanner and Coin Analysis pages. Nothing is invented here."
+          hint="Scoring engine: not built · market data: live"
         />
       </Card>
     </div>
