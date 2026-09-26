@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
+import { Link, NavLink, Outlet } from "react-router-dom";
 import {
   ArrowUpFromDot,
   Briefcase,
@@ -16,7 +16,7 @@ import {
 import { cn } from "../../lib/cn";
 import { APP_NAME } from "../../types";
 import { useMarkets } from "../../market/store";
-import { formatLastUpdated } from "../../market/freshness";
+import { ConnectionBadge, ConnectionLine } from "../ConnectionBadge";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
@@ -102,21 +102,7 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
 
 export default function AppLayout() {
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const location = useLocation();
-  const { status, updatedAt, markets } = useMarkets();
-  const active = NAV.find((n) =>
-    n.end ? location.pathname === n.to : location.pathname.startsWith(n.to.split("/").slice(0, 2).join("/"))
-  );
-  const statusDot =
-    status === "live" ? "bg-emerald-400" : status === "stale" ? "bg-amber-400" : status === "error" ? "bg-rose-400" : "bg-slate-500";
-  const statusText =
-    status === "live"
-      ? `${active?.label ?? "CryptoIn"} · LIVE · ${markets.length} markets`
-      : status === "stale"
-        ? `${active?.label ?? "CryptoIn"} · DATA STALE`
-        : status === "error"
-          ? `${active?.label ?? "CryptoIn"} · DATA ERROR`
-          : `${active?.label ?? "CryptoIn"} · Loading…`;
+  const { markets } = useMarkets();
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 lg:flex">
@@ -187,16 +173,15 @@ export default function AppLayout() {
               <Logo />
             </div>
             <div className="ml-auto flex items-center gap-2">
-              <span
-                className="hidden items-center gap-2 rounded-full border border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-400 sm:inline-flex"
-                title={formatLastUpdated(updatedAt)}
-              >
-                <span className={`h-1.5 w-1.5 rounded-full ${statusDot}`} />
-                {statusText}
+              {markets.length > 0 && (
+                <span className="hidden text-[11px] text-slate-500 md:inline">
+                  {markets.length} markets
+                </span>
+              )}
+              <span className="hidden sm:inline">
+                <ConnectionLine />
               </span>
-              <span className="inline-flex items-center rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-bold tracking-widest text-emerald-300">
-                {status === "live" ? "LIVE" : status === "stale" ? "STALE" : status.toUpperCase()}
-              </span>
+              <ConnectionBadge />
             </div>
           </div>
         </header>

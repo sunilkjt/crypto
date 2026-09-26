@@ -12,7 +12,8 @@ Tech: React + TypeScript + Vite + Tailwind CSS v4 + Recharts + React Router + Lu
 - [x] Live prices on Dashboard + Scanner with `LIVE` / `DATA STALE` states
 - [x] Candle history via `getCandles(symbol, timeframe, startTime, endTime)` → normalized `Candle`
 - [x] Coin Analysis (`/coin/OP`) with real KPIs + full-window SVG candlestick chart + 1m/5m/15m/1h/4h switching (no reload)
-- [x] Real-time updates: single shared WS (`allMids` + `candle` subs) with reconnect/backoff/heartbeat, polling fallback, cleanup on unmount, no duplicate sockets
+- [x] Connection status: `CONNECTING` 🟡 / `ONLINE` 🟢 / `DEGRADED` 🟠 / `OFFLINE` 🔴 — ONLINE requires recently received data, never page load — plus `Last update: X seconds ago` in the topbar and on every market page
+- [x] Realtime: WebSocket first, HTTPS polling fallback (`realtime.ts`), single shared socket
 - [x] Cache: TTL + concurrent-request coalescing, stale expiry, error recovery (in-memory only, no Redis)
 - [x] Offline snapshot: last good markets universe persisted to localStorage, painted instantly (stale-flagged) on reload/offline
 - [x] Error handling: network/API/invalid/missing-market/missing-candles/WS-disconnect/rate-limit/timeout → `"Unable to retrieve Hyperliquid market data. Retrying…"` — never fabricated prices
@@ -56,16 +57,19 @@ src/market/
     funding.ts        # toFunding, formatFundingRate
     openInterest.ts   # toOpenInterest, formatOpenInterestNotional
     index.ts          # getMarkets() (all dexes), getAllMids(), getCachedCandles()
+    realtime.ts       # startMarketRealtime() — WS first, HTTPS polling fallback
     __tests__/       # markets/candles/timeframes/client (mocked fetch)
   cache.ts            # cached(key, ttl, fetcher) — dedupe, TTL, failure recovery
   persist.ts          # localStorage last-good snapshot — instant stale paint offline
+  connection.ts       # CONNECTING/ONLINE/DEGRADED/OFFLINE machine + last-update labels
   freshness.ts        # FRESHNESS thresholds, isStale, formatLastUpdated
   ws.ts               # singleton WsManager — 1 socket, multiplexed subs, backoff, heartbeat
   store.tsx           # MarketDataProvider + useMarkets() — snapshot poll 30s, mids fallback 15s
   useCandles.ts       # useCandles(symbol, tf) — REST + WS merge + 30s fallback
-  __tests__/          # freshness, cache, persist
+  __tests__/          # freshness, cache, persist, connection
 src/components/
-  LiveBadge.tsx       # LiveBadge + FreshnessLabel + StatusPill
+  LiveBadge.tsx       # legacy data-availability badges (kept for page headers)
+  ConnectionBadge.tsx # 🟢/🟡/🟠/🔴 badge + last-update line (topbar, Bounce)
   CandleChart.tsx     # lightweight SVG candlesticks (full 300-candle window)
 ```
 
@@ -75,7 +79,7 @@ Rules: UI never touches `fetch` or raw shapes — only `useMarkets()`, `useCandl
 
 ```bash
 npm install
-npm test        # vitest run — 40 mocked unit tests
+npm test        # vitest run — 47 mocked unit tests
 npm run build   # tsc -b && vite build
 npm run dev     # http://localhost:5173
 ```
@@ -94,3 +98,4 @@ Verify: Dashboard (BTC/ETH live) → Scanner (search `OP`, `ETH`; sort by Volume
 - Chunk-size warning (>500kB, Recharts) — pre-existing, no code-split in this phase.
 - WS `allMids` streams main-dex mids; HIP-3 rows refresh on the 30s snapshot poll.
 - `allPerpMetas` intentionally unused: live shape carries no asset contexts — per-dex `metaAndAssetCtxs` is the reliable source.
+- GitHub Pages edge caching can serve the previous bundle for a few minutes after a deploy; the Actions run status is the source of truth.

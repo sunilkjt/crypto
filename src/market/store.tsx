@@ -8,22 +8,27 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { getMarkets, getAllMids } from "./hyperliquid";
+import { getMarkets } from "./hyperliquid";
+import { startMarketRealtime } from "./hyperliquid/realtime";
 import { mergeLivePrices } from "./hyperliquid/markets";
-import { wsManager } from "./ws";
 import { isMarketsStale } from "./freshness";
+import { deriveConnection, type ConnectionState } from "./connection";
 import { loadMarketsSnapshot, saveMarketsSnapshot } from "./persist";
 import type { Market, MarketStatus } from "./hyperliquid/types";
 import { HyperliquidError } from "./hyperliquid/types";
 
 const POLL_MS = 30_000;
-const MID_POLL_MS = 15_000;
 
 interface MarketDataValue {
   markets: Market[];
+  /** Legacy data-availability flag kept for existing pages. */
   status: MarketStatus;
+  /** Real connection state: earned by received data, never by page load. */
+  connection: ConnectionState;
   error: string | null;
   updatedAt: number;
+  lastSuccessAt: number;
+  consecutiveFailures: number;
   stale: boolean;
   refresh: () => void;
 }
@@ -36,6 +41,16 @@ function toMessage(err: unknown): string {
   if (err instanceof HyperliquidError) return err.message;
   if (err instanceof Error && err.message) return err.message;
   return FRIENDLY_ERROR;
+}
+
+/** Cancellations (refresh supersede / unmount) are not connection failures. */
+function isCancellation(err: unknown): boolean {
+  if (err instanceof DOMException && err.name === "AbortError") return true;
+  return (
+    err instanceof HyperliquidError &&
+    err.kind === "network" &&
+    /cancel/i.test(err.message)
+  );
 }
 
 function initialSnapshot(): { markets: Market[]; updatedAt: number } {
@@ -53,10 +68,25 @@ export function MarketDataProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<MarketStatus>(boot.markets.length > 0 ? "stale" : "loading");
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState(boot.updatedAt);
+  const [lastSuccessAt, setLastSuccessAt] = useState(0);
+  const [consecutiveFailures, setConsecutiveFailures] = useState(0);
   const [tick, setTick] = useState(0);
+  const startedAtRef = useRef(Date.now());
   const abortRef = useRef<AbortController | null>(null);
   const marketsRef = useRef<Market[]>([]);
   marketsRef.current = markets;
+
+  const recordSuccess = useCallback((at: number) => {
+    setLastSuccessAt(at);
+    setConsecutiveFailures(0);
+    setError(null);
+  }, []);
+
+  const recordFailure = useCallback((err: unknown) => {
+    if (isCancellation(err)) return;
+    setConsecutiveFailures((f) => f + 1);
+    setError(toMessage(err));
+  }, []);
 
   const load = useCallback(async (isRefresh = false) => {
     abortRef.current?.abort();
@@ -70,20 +100,18 @@ export function MarketDataProvider({ children }: { children: ReactNode }) {
       });
       setMarkets(fresh);
       setUpdatedAt(ts);
-      setError(null);
       setStatus("live");
+      recordSuccess(ts);
       saveMarketsSnapshot({ markets: fresh, updatedAt: ts });
     } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
+      if (isCancellation(err)) return;
+      recordFailure(err);
       // Keep last good snapshot; surface error only when we have nothing.
       if (marketsRef.current.length === 0) {
         setStatus("error");
-        setError(toMessage(err));
-      } else {
-        setError(toMessage(err));
       }
     }
-  }, []);
+  }, [recordSuccess, recordFailure]);
 
   const refresh = useCallback(() => {
     setTick((t) => t + 1);
@@ -101,47 +129,53 @@ export function MarketDataProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tick]);
 
-  // Single shared WS for live mids; polling fallback when WS is quiet.
+  // Realtime ticks: WebSocket first, HTTPS polling fallback (see realtime.ts).
   useEffect(() => {
-    let lastWsTick = 0;
-    const unsub = wsManager.subscribeAllMids((mids) => {
-      lastWsTick = Date.now();
-      setMarkets((prev) => (prev.length === 0 ? prev : mergeLivePrices(prev, mids)));
-      setUpdatedAt(Date.now());
-      setStatus((s) => (s === "error" ? s : "live"));
-    });
-    const fallback = window.setInterval(async () => {
-      if (Date.now() - lastWsTick < MID_POLL_MS) return;
-      if (marketsRef.current.length === 0) return;
-      try {
-        const { mids, updatedAt: ts } = await getAllMids();
-        setMarkets((prev) => mergeLivePrices(prev, mids));
-        setUpdatedAt(ts);
-      } catch {
-        // Polling fallback is best-effort; snapshot poll reports errors.
-      }
-    }, MID_POLL_MS);
-    return () => {
-      unsub();
-      window.clearInterval(fallback);
-    };
-  }, []);
+    const stop = startMarketRealtime(
+      {
+        onTick: (mids, _source, at) => {
+          setMarkets((prev) => (prev.length === 0 ? prev : mergeLivePrices(prev, mids)));
+          setUpdatedAt(at);
+          setStatus((s) => (s === "error" ? s : "live"));
+          recordSuccess(at);
+        },
+        onPollError: (message) => {
+          recordFailure(new Error(message));
+        },
+      },
+    );
+    return stop;
+  }, [recordSuccess, recordFailure]);
 
   const stale = useMemo(
     () => (updatedAt === 0 ? false : isMarketsStale(updatedAt)),
     [updatedAt],
   );
 
+  const connection = useMemo<ConnectionState>(
+    () =>
+      deriveConnection({
+        lastSuccessAt,
+        startedAt: startedAtRef.current,
+        consecutiveFailures,
+        hasData: markets.length > 0,
+      }),
+    [lastSuccessAt, consecutiveFailures, markets.length],
+  );
+
   const value = useMemo<MarketDataValue>(
     () => ({
       markets,
       status: status === "live" && stale ? "stale" : status,
+      connection,
       error,
       updatedAt,
+      lastSuccessAt,
+      consecutiveFailures,
       stale,
       refresh,
     }),
-    [markets, status, error, updatedAt, stale, refresh],
+    [markets, status, connection, error, updatedAt, lastSuccessAt, consecutiveFailures, stale, refresh],
   );
 
   return <MarketDataContext.Provider value={value}>{children}</MarketDataContext.Provider>;
