@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { Card, CardHeader, DemoBadge, DirectionBadge, PageHeader, Stat } from "../components/ui";
 import { AiAnalysisCard } from "../components/AiAnalysisCard";
 import { NewsList } from "../components/NewsList";
@@ -250,6 +250,34 @@ export default function CoinAnalysis() {
   const { symbol = "OP" } = useParams();
   const coin = (symbol ?? "OP").toUpperCase();
   const [tf, setTf] = useState<Timeframe>("15m");
+  const location = useLocation();
+  // Alert context banner: validated shape only; refresh-safe (absent on reload).
+  const alertCtx =
+    location.state !== null &&
+    typeof location.state === "object" &&
+    (location.state as { fromAlert?: unknown }).fromAlert !== null &&
+    typeof (location.state as { fromAlert?: unknown }).fromAlert === "object"
+      ? ((location.state as { fromAlert: Record<string, unknown> }).fromAlert as {
+          id?: unknown;
+          type?: unknown;
+          direction?: unknown;
+          strength?: unknown;
+          timestamp?: unknown;
+        })
+      : null;
+  const alertBanner =
+    alertCtx !== null &&
+    (alertCtx.direction === "LONG" || alertCtx.direction === "SHORT") &&
+    typeof alertCtx.strength === "number" &&
+    typeof alertCtx.timestamp === "number"
+      ? {
+          type: typeof alertCtx.type === "string" ? alertCtx.type.replace(/_/g, " ") : "signal",
+          direction: alertCtx.direction as "LONG" | "SHORT",
+          strength: alertCtx.strength,
+          timestamp: alertCtx.timestamp,
+        }
+      : null;
+  const [bannerDismissed, setBannerDismissed] = useState(false);
 
   const { markets, status: mktStatus, updatedAt: mktUpdated, stale: mktStale } = useMarkets();
   const market = useMemo(
@@ -332,6 +360,23 @@ export default function CoinAnalysis() {
           </div>
         }
       />
+
+      {alertBanner && !bannerDismissed && (
+        <div className="mb-4 flex items-center gap-3 rounded-2xl border border-cyan-400/30 bg-cyan-400/[0.07] px-5 py-3 text-[13px] text-slate-200">
+          <span>
+            Opened from alert: <strong>{alertBanner.type}</strong> · {coin} {alertBanner.direction} ·
+            strength {alertBanner.strength} · {new Date(alertBanner.timestamp).toLocaleString()} — showing
+            current live analysis, which may have evolved since the alert.
+          </span>
+          <button
+            onClick={() => setBannerDismissed(true)}
+            aria-label="Dismiss alert context"
+            className="ml-auto rounded-lg border border-slate-700 px-2 py-1 text-[11px] font-bold text-slate-300 hover:bg-slate-800"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <div className="mb-4 flex flex-wrap gap-2">
         {watchlist.map((c) => (

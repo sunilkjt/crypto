@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, NavLink, Outlet } from "react-router-dom";
+import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   ArrowUpFromDot,
   Bell,
@@ -20,7 +20,9 @@ import { APP_NAME } from "../../types";
 import { useMarkets } from "../../market/store";
 import { ConnectionBadge, ConnectionLine } from "../ConnectionBadge";
 import {
+  alertCoinNavigation,
   eventMessage,
+  markAlertRead,
   markAllAlertsRead,
   subscribeAlerts,
   type SignalEvent,
@@ -115,6 +117,7 @@ export default function AppLayout() {
   const [notesOpen, setNotesOpen] = useState(false);
   const [notes, setNotes] = useState<SignalEvent[]>([]);
   const { markets } = useMarkets();
+  const navigate = useNavigate();
 
   useEffect(() => subscribeAlerts(setNotes), []);
   const unread = notes.filter((n) => !n.read).length;
@@ -223,14 +226,32 @@ export default function AppLayout() {
                         No alert events yet. The monitor emits here on NEW setups and material changes — never per refresh.
                       </p>
                     ) : (
-                      notes.slice(0, 20).map((n) => (
-                        <div key={n.id} className="rounded-lg px-2 py-1.5 hover:bg-slate-800/60">
-                          <p className="text-xs text-slate-200">{eventMessage(n)}</p>
-                          <p className="text-[10px] text-slate-500">
-                            {n.type.replace(/_/g, " ")} · {n.status} · {new Date(n.timestamp).toLocaleTimeString()}
-                          </p>
-                        </div>
-                      ))
+                      notes.slice(0, 20).map((n) => {
+                        const nav = alertCoinNavigation(n);
+                        const clickable = nav.path !== null;
+                        return (
+                          <button
+                            key={n.id}
+                            disabled={!clickable}
+                            onClick={() => {
+                              if (!clickable || !nav.path) return;
+                              if (!n.read) markAlertRead(n.id);
+                              setNotesOpen(false);
+                              navigate(nav.path, nav.state ? { state: nav.state } : undefined);
+                            }}
+                            title={clickable ? `Open ${n.symbol} analysis` : "Alert has no valid market reference"}
+                            className={cn(
+                              "block w-full rounded-lg px-2 py-1.5 text-left hover:bg-slate-800/60",
+                              clickable ? "cursor-pointer" : "cursor-default opacity-60",
+                            )}
+                          >
+                            <p className="text-xs text-slate-200">{eventMessage(n)}</p>
+                            <p className="text-[10px] text-slate-500">
+                              {n.type.replace(/_/g, " ")} · {n.status} · {new Date(n.timestamp).toLocaleTimeString()}
+                            </p>
+                          </button>
+                        );
+                      })
                     )}
                   </div>
                 )}
