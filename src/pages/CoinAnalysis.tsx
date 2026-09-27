@@ -3,10 +3,16 @@ import { Link, useParams } from "react-router-dom";
 import { Card, CardHeader, DemoBadge, DirectionBadge, PageHeader, Stat } from "../components/ui";
 import { CandleChart } from "../components/CandleChart";
 import { FreshnessLabel, LiveBadge } from "../components/LiveBadge";
+import { ConnectionBadge } from "../components/ConnectionBadge";
 import { useMarkets } from "../market/store";
-import { useCandles } from "../market/useCandles";
+import { useMtfCandles, useSignal } from "../analysis/hooks";
 import { SUPPORTED_TIMEFRAMES } from "../market/hyperliquid/timeframes";
 import type { Timeframe } from "../market/hyperliquid/types";
+import { lastEma } from "../indicators/ema";
+import { lastRsi } from "../indicators/rsi";
+import { lastMacd } from "../indicators/macd";
+import { lastAtr } from "../indicators/atr";
+import { volumeStats } from "../indicators/volume";
 import { formatFundingRate } from "../market/hyperliquid/funding";
 import { formatOpenInterestNotional } from "../market/hyperliquid/openInterest";
 import {
@@ -16,20 +22,48 @@ import {
 } from "../lib/format";
 import { cn } from "../lib/cn";
 
+function fmt(n: number | null, digits = 4): string {
+  if (n === null || !Number.isFinite(n)) return "—";
+  return n.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
 export default function CoinAnalysis() {
   const { symbol = "OP" } = useParams();
   const coin = (symbol ?? "OP").toUpperCase();
   const [tf, setTf] = useState<Timeframe>("15m");
 
-  const { markets, status: mktStatus, updatedAt: mktUpdated } = useMarkets();
+  const { markets, status: mktStatus, updatedAt: mktUpdated, stale: mktStale } = useMarkets();
   const market = useMemo(
     () => markets.find((m) => m.symbol === coin),
     [markets, coin],
   );
-  const { candles, status: cStatus, error: cError, updatedAt: cUpdated } = useCandles(coin, tf);
+  const { data: mtf, loading: candlesLoading, error: candlesError } = useMtfCandles(coin);
+  const signal = useSignal(coin, mtf, "15m");
 
+  const chartCandles = mtf[tf] ?? [];
   const chg = formatChangePct(market?.dayChangePct ?? null);
-  const lastClose = candles.length > 0 ? candles[candles.length - 1].close : null;
+
+  // Real indicator snapshot for the selected chart timeframe.
+  const ind = useMemo(() => {
+    if (chartCandles.length === 0) return null;
+    const closes = chartCandles.map((c) => c.close);
+    const volumes = chartCandles.map((c) => c.volume);
+    const macd = lastMacd(closes);
+    const vol = volumeStats(volumes, 20);
+    return {
+      ema20: lastEma(closes, 20),
+      ema50: lastEma(closes, 50),
+      ema200: lastEma(closes, 200),
+      rsi: lastRsi(closes, 14),
+      macdLine: macd.line,
+      macdSignal: macd.signal,
+      macdHist: macd.histogram,
+      atr: lastAtr(chartCandles, 14),
+      relVol: vol?.relative ?? null,
+      spike: vol?.spike ?? false,
+      count: chartCandles.length,
+    };
+  }, [chartCandles]);
 
   const watchlist = useMemo(() => {
     const preferred = ["BTC", "ETH", "SOL", "OP", "ARB", "AVAX", "LINK", "DOGE"];
@@ -39,15 +73,19 @@ export default function CoinAnalysis() {
     return [coin, ...list.filter((s) => s !== coin)].slice(0, 8);
   }, [markets, coin]);
 
+  const showStaleSignal = mktStale && signal !== null;
+  const insufficient =
+    !candlesLoading && (chartCandles.length > 0 && chartCandles.length < 210);
+
   return (
     <div>
       <PageHeader
         title={`Coin Analysis · ${coin}`}
-        description="Live Hyperliquid perpetual data with real candlesticks. Indicators and AI analysis arrive in later phases."
+        description="Deterministic technical analysis on live Hyperliquid candles. No AI/LLM in this phase."
         right={
           <div className="flex items-center gap-2">
-            <FreshnessLabel updatedAt={cUpdated || mktUpdated} />
-            <LiveBadge status={market ? mktStatus : cStatus} />
+            <FreshnessLabel updatedAt={mktUpdated} />
+            <ConnectionBadge />
           </div>
         }
       />
@@ -85,8 +123,8 @@ export default function CoinAnalysis() {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Stat
           label="Price"
-          value={formatPriceUsd(market?.markPrice ?? lastClose, coin)}
-          sub={market ? "mark · live" : "last close · live"}
+          value={formatPriceUsd(market?.markPrice ?? null, coin)}
+          sub={market ? "mark · live" : "—"}
         />
         <Stat
           label="24h Change"
@@ -105,7 +143,7 @@ export default function CoinAnalysis() {
       <Card className="mt-4">
         <CardHeader
           title={`Price Chart · ${coin} / USD`}
-          subtitle={`${candles.length} candles · live forming candle via WS`}
+          subtitle={`${chartCandles.length} ${tf} candles · computed locally`}
           right={
             <div className="flex gap-1 rounded-lg border border-slate-800 bg-slate-950 p-1">
               {SUPPORTED_TIMEFRAMES.map((t) => (
@@ -124,103 +162,193 @@ export default function CoinAnalysis() {
           }
         />
         <div className="p-2">
-          {cStatus === "loading" ? (
+          {candlesLoading ? (
             <p className="flex h-[260px] items-center justify-center text-sm text-slate-400">
-              Loading {coin} {tf} candles…
+              Loading {coin} candles (4h / 1h / 15m / 5m)…
             </p>
-          ) : cStatus === "error" ? (
+          ) : candlesError ? (
             <div className="flex h-[260px] flex-col items-center justify-center text-center">
-              <p className="max-w-md text-sm font-semibold text-rose-300">
-                {cError ?? "Unable to retrieve Hyperliquid market data. Retrying…"}
-              </p>
-              <p className="mt-1 text-xs text-slate-500">
-                Missing-candle state handled without fabricated prices.
-              </p>
+              <p className="max-w-md text-sm font-semibold text-rose-300">{candlesError}</p>
+              <p className="mt-1 text-xs text-slate-500">Missing-candle state — no fabricated prices.</p>
             </div>
           ) : (
             <>
-              <CandleChart candles={candles} />
+              <CandleChart candles={chartCandles} />
               <div className="flex flex-wrap items-center gap-2 px-3 pt-1 pb-2 text-[11px] text-slate-500">
-                <LiveBadge status={cStatus} />
-                <FreshnessLabel updatedAt={cUpdated} />
-                <span className="ml-auto font-mono">
-                  O {candles.length ? candles[candles.length - 1].open.toFixed(4) : "—"} · H{" "}
-                  {candles.length ? candles[candles.length - 1].high.toFixed(4) : "—"} · L{" "}
-                  {candles.length ? candles[candles.length - 1].low.toFixed(4) : "—"} · C{" "}
-                  {candles.length ? candles[candles.length - 1].close.toFixed(4) : "—"}
-                </span>
+                <LiveBadge status={mktStatus} />
+                <FreshnessLabel updatedAt={mktUpdated} />
               </div>
             </>
           )}
         </div>
       </Card>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-3">
-        <Card>
-          <CardHeader title="Indicators" subtitle="Phase 3+ — not computed from live data yet" />
-          <div className="space-y-2.5 p-5 text-sm">
-            {["EMA 20", "EMA 50", "EMA 200", "RSI", "MACD", "ATR"].map((k) => (
-              <div
-                key={k}
-                className="flex items-center justify-between border-b border-dashed border-slate-800/70 pb-2 last:border-0 last:pb-0"
-              >
-                <span className="text-slate-400">{k}</span>
-                <span className="font-mono text-slate-600">Phase 3+</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        <Card>
-          <CardHeader title="Market Structure" subtitle="Phase 3+ — manual read for now" />
-          <div className="space-y-2.5 p-5 text-sm">
-            {["Trend", "Support", "Resistance", "Breakout", "Retest"].map((k) => (
-              <div
-                key={k}
-                className="flex items-center justify-between border-b border-dashed border-slate-800/70 pb-2 last:border-0 last:pb-0"
-              >
-                <span className="text-slate-400">{k}</span>
-                <span className="font-mono text-slate-600">—</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        <Card>
-          <CardHeader title="Signal" subtitle="Disabled in Phase 2" right={<DirectionBadge direction="WAIT" />} />
-          <div className="space-y-2.5 p-5 text-sm">
-            <p className="text-xs font-bold tracking-widest text-slate-500 uppercase">Trade Plan</p>
-            {["Entry", "Invalidation", "TP1", "TP2", "TP3", "Risk/Reward"].map((k) => (
-              <div
-                key={k}
-                className="flex items-center justify-between border-b border-dashed border-slate-800/70 pb-2 last:border-0 last:pb-0"
-              >
-                <span className="text-slate-400">{k}</span>
-                <span className="font-mono text-slate-600">—</span>
-              </div>
-            ))}
-            <p className="pt-1 text-[11px] text-slate-600">
-              No LONG/SHORT recommendations are generated from market data in this phase.
-            </p>
-          </div>
-        </Card>
-      </div>
-
+      {/* Real indicator values for the selected timeframe */}
       <Card className="mt-4">
-        <CardHeader
-          title="AI Analysis"
-          subtitle="Phase 3+ — market data only in this build"
-          right={<DemoBadge label="PHASE 3+" />}
-        />
-        <div className="grid gap-3 p-5 md:grid-cols-2 lg:grid-cols-3">
-          {["Market Structure", "Setup", "Confirmations", "Risks", "Invalidation", "Trade Plan"].map((k) => (
-            <div key={k} className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-              <p className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">{k}</p>
-              <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
-                AI output for {coin} is out of scope for Phase 2 (market data only).
+        <CardHeader title={`Indicators · ${tf}`} subtitle="EMA · RSI · MACD · ATR · Volume — calculated locally from OHLCV" />
+        <div className="grid grid-cols-2 gap-2.5 p-5 text-sm sm:grid-cols-3 lg:grid-cols-6">
+          {[
+            ["EMA 20", ind?.ema20 ?? null, 4],
+            ["EMA 50", ind?.ema50 ?? null, 4],
+            ["EMA 200", ind?.ema200 ?? null, 4],
+            ["RSI 14", ind?.rsi ?? null, 1],
+            ["ATR 14", ind?.atr ?? null, 4],
+            ["Rel. Vol", ind?.relVol ?? null, 2],
+          ].map(([label, v, d]) => (
+            <div key={label as string} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+              <p className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">{label}</p>
+              <p className="mt-1 font-mono text-[15px] font-bold text-slate-100">
+                {fmt(v as number | null, d as number)}
+                {label === "Rel. Vol" && (v as number | null) !== null ? "×" : ""}
               </p>
             </div>
           ))}
+        </div>
+        <div className="grid grid-cols-3 gap-2.5 px-5 pb-5 text-sm">
+          {[
+            ["MACD line", ind?.macdLine ?? null],
+            ["MACD signal", ind?.macdSignal ?? null],
+            ["MACD hist", ind?.macdHist ?? null],
+          ].map(([label, v]) => (
+            <div key={label as string} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+              <p className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">{label}</p>
+              <p
+                className={cn(
+                  "mt-1 font-mono text-[15px] font-bold",
+                  (v as number | null) !== null && (v as number) > 0 && (label as string).includes("hist")
+                    ? "text-emerald-300"
+                    : (v as number | null) !== null && (v as number) < 0 && (label as string).includes("hist")
+                      ? "text-rose-300"
+                      : "text-slate-100",
+                )}
+              >
+                {fmt(v as number | null, 4)}
+              </p>
+            </div>
+          ))}
+        </div>
+        {ind?.spike && (
+          <p className="px-5 pb-4 text-xs font-semibold text-amber-300">Volume spike on the latest {tf} bar.</p>
+        )}
+      </Card>
+
+      {/* Signal readout */}
+      <Card className="mt-4">
+        <CardHeader
+          title="Signal · 15m setup"
+          subtitle="Deterministic scoring — Signal Strength 0–100, never a probability"
+          right={
+            signal && !showStaleSignal ? (
+              <DirectionBadge direction={signal.direction} />
+            ) : (
+              <DemoBadge label={showStaleSignal ? "DATA STALE" : insufficient ? "INSUFFICIENT DATA" : "COMPUTING"} />
+            )
+          }
+        />
+        {signal === null || candlesLoading ? (
+          <p className="px-5 py-8 text-center text-sm text-slate-400">Computing signal…</p>
+        ) : showStaleSignal ? (
+          <div className="px-5 py-8 text-center">
+            <p className="text-sm font-semibold text-amber-300">DATA STALE</p>
+            <p className="mx-auto mt-1 max-w-md text-xs text-slate-500">
+              Market data is stale — no fresh signal is created from it. Values below are withheld, not guessed.
+            </p>
+          </div>
+        ) : insufficient ? (
+          <div className="px-5 py-8 text-center">
+            <p className="text-sm font-semibold text-amber-300">INSUFFICIENT DATA</p>
+            <p className="mx-auto mt-1 max-w-md text-xs text-slate-500">
+              {chartCandles.length}/210 {tf} candles — EMA200 and full indicators need more history.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-4 p-5">
+            <div className="flex flex-wrap items-baseline gap-3">
+              <span className="font-mono text-3xl font-extrabold text-white">{signal.signalStrength}</span>
+              <span className="text-sm font-bold text-cyan-300">{signal.classification}</span>
+              <span className="ml-auto font-mono text-xs text-slate-500">
+                LONG {signal.longScore} · SHORT {signal.shortScore}
+              </span>
+            </div>
+
+            <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+              {[
+                ["Trend", signal.trend],
+                ["Momentum", signal.momentum],
+                ["Volume", signal.volume],
+                ["Structure", signal.marketStructure],
+              ].map(([k, v]) => (
+                <div key={k as string} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                  <p className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">{k}</p>
+                  <p className="mt-1 text-sm font-bold text-slate-100">{v}</p>
+                </div>
+              ))}
+            </div>
+
+            {signal.multiTimeframe && (
+              <div className="flex flex-wrap gap-2">
+                {signal.multiTimeframe.tfs.map((t) => (
+                  <span
+                    key={t.timeframe}
+                    className="rounded-full border border-slate-800 bg-slate-950 px-3 py-1 font-mono text-[11px] text-slate-300"
+                  >
+                    {t.timeframe}: {t.flavor}
+                  </span>
+                ))}
+                {signal.multiTimeframe.conflict && (
+                  <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-[11px] font-bold text-amber-300">
+                    MTF conflict — score halved
+                  </span>
+                )}
+              </div>
+            )}
+
+            <div>
+              <p className="text-xs font-bold tracking-widest text-slate-500 uppercase">Trade Plan</p>
+              <div className="mt-2 grid grid-cols-2 gap-2 font-mono text-[13px] sm:grid-cols-4">
+                {[
+                  ["Entry", signal.entryLow !== null ? `${fmt(signal.entryLow)} – ${fmt(signal.entryHigh)}` : "—"],
+                  ["Invalidation", fmt(signal.invalidation)],
+                  ["TP1 / TP2 / TP3", signal.tp1 !== null ? `${fmt(signal.tp1)} / ${fmt(signal.tp2)} / ${fmt(signal.tp3)}` : "—"],
+                  ["R:R", signal.riskReward !== null ? `1 : ${signal.riskReward}` : "—"],
+                ].map(([k, v]) => (
+                  <div key={k as string} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                    <p className="font-sans text-[11px] font-bold tracking-widest text-slate-500 uppercase">{k}</p>
+                    <p className="mt-1 font-bold text-slate-100">{v}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid gap-2.5 md:grid-cols-2">
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                <p className="text-[11px] font-bold tracking-widest text-emerald-400/80 uppercase">Reasons</p>
+                <ul className="mt-1.5 space-y-1 text-xs leading-relaxed text-slate-300">
+                  {signal.reasons.length === 0 && <li>—</li>}
+                  {signal.reasons.map((r, i) => (
+                    <li key={i}>· {r}</li>
+                  ))}
+                </ul>
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                <p className="text-[11px] font-bold tracking-widest text-amber-400/80 uppercase">Warnings</p>
+                <ul className="mt-1.5 space-y-1 text-xs leading-relaxed text-slate-300">
+                  {signal.warnings.length === 0 && <li>—</li>}
+                  {signal.warnings.map((w, i) => (
+                    <li key={i}>· {w}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      <Card className="mt-4">
+        <CardHeader title="AI Analysis" subtitle="Phase 4+ — no LLM in this build" right={<DemoBadge label="PHASE 4+" />} />
+        <div className="px-5 py-4 text-xs leading-relaxed text-slate-500">
+          Deterministic analysis above is the complete Phase 3 output. An LLM analyst may interpret
+          these transparent scores in a later phase — it will never replace them.
         </div>
       </Card>
     </div>

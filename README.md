@@ -1,7 +1,8 @@
-# CryptoIn AI Signal — Phase 2 (Live Hyperliquid Market Data) ✅
+# CryptoIn AI Signal — Phase 3 (Deterministic Technical Analysis + Signal Scoring) ✅
 
-Standalone crypto AI signal web app. **Public market data only. No real-money trading.
-No signals, no backtesting, no paper trading in this phase.**
+Standalone crypto signal web app. **Deterministic math engine on live public
+Hyperliquid data. No LLM/AI analyst, no real trading, no automated orders,
+no paper trading, no backtesting in this phase.**
 
 Tech: React + TypeScript + Vite + Tailwind CSS v4 + Recharts + React Router + Lucide + Vitest.
 
@@ -20,7 +21,33 @@ Tech: React + TypeScript + Vite + Tailwind CSS v4 + Recharts + React Router + Lu
 - [x] Freshness: `Last updated: X seconds ago` + `DATA STALE` past threshold (markets 60s, candles 90s)
 - [x] Search (client-side, no per-keystroke requests) + sorting (price/24h/volume/funding/OI, client-side) + pagination (25/page)
 - [x] Strict TypeScript types: `Market, Candle, Ticker, Funding, OpenInterest, MarketData, Timeframe` — no `any`
-- [x] Tests (mocked, 40 passing) + `npm run build` green
+- [x] Tests (mocked, 40 passing) + `npm run build` green (Phase 2 baseline)
+
+## Phase 3 completed — deterministic engine (no LLM)
+
+Indicators (`src/indicators/`, all local OHLCV math, null = insufficient data):
+- EMA 20/50/200 (SMA-seeded), RSI 14 (Wilder), MACD 12/26/9 + histogram, ATR 14 (Wilder TR), volume avg/relVol/spike (current excluded from average)
+
+Scoring (`src/analysis/`): Trend 25 (EMA-stack 5-point vote + ATR-epsilon) ·
+Momentum 20 (RSI recovery, never blind oversold + MACD improvement) ·
+Volume 15 (direction-agnostic confirmation) · Structure 20 (HH/HL/LH/LL swings,
+close-confirmed breakouts, retests, false-breakout veto) ·
+MTF 20 (4H major / 1H structure / 15M setup / 5M entry, conflicts halve it).
+`calculateSignalScore()` scores LONG and SHORT independently; mixed or weak
+evidence → WAIT (min edge 10, min score 40, plus range + chop-regime guards).
+
+Bands: 0–39 WAIT · 40–59 WATCH · 60–74 SETUP · 75–89 STRONG SETUP · 90–100
+HIGH-CONFLUENCE SETUP. Strength categories, never success probabilities.
+
+Trade plans from structure only (no fixed %): entry zone, swing/SR/ATR
+invalidation, TP1<TP2<TP3 (LONG, mirrored SHORT) with R floors, R:R to mean TP.
+
+`#/bounce` scans top-25 by volume (bounded concurrency, progress bar, stale
+guard) and lists only agreeing bounce setups ≥ SETUP, else
+"No high-confluence bounce setups currently detected." `INSUFFICIENT DATA`
+below 210 setup candles; `DATA STALE` never mints fresh signals.
+
+- [x] Tests (mocked, 101 passing) + `npm run build` green
 
 ## Hyperliquid data sources (public only)
 
@@ -71,6 +98,13 @@ src/components/
   LiveBadge.tsx       # legacy data-availability badges (kept for page headers)
   ConnectionBadge.tsx # 🟢/🟡/🟠/🔴 badge + last-update line (topbar, Bounce)
   CandleChart.tsx     # lightweight SVG candlesticks (full 300-candle window)
+src/indicators/       # local OHLCV math: ema, rsi, macd, atr, volume (+ index)
+  __tests__/          # hand-checked known values (EMA seed, Wilder RSI, TR, relVol)
+src/analysis/         # deterministic engine: trend, momentum, volumeProfile,
+                      # swings, levels, structure (+efficiencyRatio), mtf,
+                      # bounce, scoring, tradeplan, signal, hooks
+  __tests__/          # scenario generators (bull/bear/chop/V-recovery/
+                      # false-breakout/wick-rejection/dead-floor/insufficient)
 ```
 
 Rules: UI never touches `fetch` or raw shapes — only `useMarkets()`, `useCandles()`, `getMarkets()`, `getCandles()`, formatters.
@@ -79,19 +113,20 @@ Rules: UI never touches `fetch` or raw shapes — only `useMarkets()`, `useCandl
 
 ```bash
 npm install
-npm test        # vitest run — 47 mocked unit tests
+npm test        # vitest run — 101 mocked unit tests
 npm run build   # tsc -b && vite build
 npm run dev     # http://localhost:5173
 ```
 
-Verify: Dashboard (BTC/ETH live) → Scanner (search `OP`, `ETH`; sort by Volume/Funding/OI; paginate) → `/coin/OP`, `/coin/ETH` (KPIs live, switch 1m→4h without reload, candles update) → kill network to see error state → wait 60s+ to see DATA STALE.
+Verify: Dashboard (BTC/ETH live) → Scanner (search `OP`; sort Strength/RSI page-scoped, Volume universe-wide) → `/coin/OP` (real EMA/RSI/MACD/ATR, trend/structure, LONG/SHORT/WAIT + plan) → `#/bounce` (top-25 scan, progress, honest empty state) → kill network for error state → wait 60s+ for DATA STALE (no fresh signals).
 
 ## Pages
 
-- `/` Dashboard — live BTC/ETH/majors + snapshot; signal cards stay honest `PHASE 3+` placeholders
-- `/scanner` — live universe table: Coin/Price/24h/Volume/Funding/OI + search/sort/paginate
-- `/coin/:symbol` — live KPIs + real candles; indicators/AI blocks marked Phase 3+
-- `/bounce`, `/history`, `/backtest`, `/paper`, `/settings` — unchanged Phase 1 shells (out of scope)
+- `/` Dashboard — live BTC/ETH/majors + snapshot; signal cards stay `PHASE 4+` placeholders (no signal engine there by design)
+- `/scanner` — live table + deterministic 15m signals per row: Coin/Price/24h%/Trend/RSI/Volume/Structure/MTF/Signal/Strength
+- `/coin/:symbol` — live KPIs + candles + real EMA/RSI/MACD/ATR + trend/structure/levels + LONG/SHORT/WAIT signal with entry/invalidation/TPs/R:R; AI block marked Phase 4+
+- `/bounce` — top-25 volume scan with full MTF scoring; honest empty state when nothing qualifies
+- `/history`, `/backtest`, `/paper`, `/settings` — unchanged shells (out of scope)
 
 ## Known limitations
 
