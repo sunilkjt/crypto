@@ -4,14 +4,6 @@ import { computeMetrics } from "../metrics";
 import { DEFAULT_BACKTEST_CONFIG } from "../types";
 import { candlesFromCloses, trendCandles, uptrend } from "../../analysis/__tests__/helpers";
 import { buildSignal } from "../../analysis/signal";
-import type { Candle } from "../../market/hyperliquid/types";
-
-function tfStair(dir: "up" | "down"): Record<string, Candle[]> {
-  const c = trendCandles(dir);
-  const closes = c.map((x) => x.close);
-  const plain = candlesFromCloses(closes);
-  return { "15m": c, "5m": plain.slice(-120), "1h": plain, "4h": plain };
-}
 
 const CFG = {
   ...DEFAULT_BACKTEST_CONFIG,
