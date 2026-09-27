@@ -13,9 +13,16 @@ const PAD_B = 22;
  * Renders the full fetched window (300 candles max from useCandles) —
  * a single SVG with a few hundred nodes stays responsive, unlike hundreds
  * of chart components. Aggregation is deliberately avoided so no price
- * action is hidden from the user.
+ * action is hidden from the user. Optional `levels` overlay entry/SL/TPs.
  */
-export function CandleChart({ candles }: { candles: Candle[] }) {
+export interface ChartLevel {
+  price: number;
+  label: string;
+  color: string;
+  dashed?: boolean;
+}
+
+export function CandleChart({ candles, levels = [] }: { candles: Candle[]; levels?: ChartLevel[] }) {
   const view = useMemo(() => {
     const data = candles;
     if (data.length === 0) return null;
@@ -103,6 +110,24 @@ export function CandleChart({ candles }: { candles: Candle[] }) {
           {t >= 1000 ? t.toFixed(1) : t >= 100 ? t.toFixed(2) : t >= 1 ? t.toFixed(3) : t.toFixed(5)}
         </text>
       ))}
+      {levels
+        .filter((l) => Number.isFinite(l.price) && l.price >= lo && l.price <= hi)
+        .map((l, i) => (
+          <g key={`${l.label}-${i}`}>
+            <line
+              x1={PAD_L}
+              x2={W - PAD_R}
+              y1={y(l.price)}
+              y2={y(l.price)}
+              stroke={l.color}
+              strokeWidth={1.2}
+              strokeDasharray={l.dashed === false ? undefined : "5 4"}
+            />
+            <text x={W - PAD_R + 4} y={y(l.price) - 3} fill={l.color} fontSize={9} fontWeight="bold">
+              {l.label}
+            </text>
+          </g>
+        ))}
     </svg>
   );
 }

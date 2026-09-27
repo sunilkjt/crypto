@@ -31,6 +31,7 @@ import { assessQuality } from "../signals/quality";
 import { loadJournal } from "../signals/journal";
 import { summarizeRegime } from "../ai/regime";
 import { backfillAiSummary } from "../signals/journal";
+import { getSharedPaperEngine } from "../paper";
 import { useScan } from "../scanner";
 import type { Signal } from "../analysis/signal";
 
@@ -131,6 +132,86 @@ function CoinOutcomes({ symbol }: { symbol: string }) {
         ))}
       </ul>
     </div>
+  );
+}
+
+/** Signal → simulated position with explicit confirmation. Never an order. */
+function TakePaperTrade({ signal, coin, mark }: { signal: Signal; coin: string; mark: number | null }) {
+  const [open, setOpen] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
+  const tradeable =
+    (signal.direction === "LONG" || signal.direction === "SHORT") &&
+    signal.invalidation !== null &&
+    signal.tp1 !== null &&
+    mark !== null;
+  if (!tradeable) return null;
+
+  const engine = getSharedPaperEngine();
+  const cfg = engine.getSnapshot().config;
+  const entry = mark as number;
+  const stopDist =
+    signal.direction === "LONG" ? entry - (signal.invalidation as number) : (signal.invalidation as number) - entry;
+  const risk = engine.getSnapshot().balance * cfg.riskPerTrade;
+  const size = stopDist > 0 ? risk / stopDist : 0;
+
+  const confirm = () => {
+    const marks = new Map([[coin, entry]]);
+    const pos = engine.open(
+      {
+        symbol: coin,
+        timeframe: signal.timeframe,
+        setupType: classifySetupType(signal),
+        direction: signal.direction as "LONG" | "SHORT",
+        entry,
+        invalidation: signal.invalidation as number,
+        tp1: signal.tp1 as number,
+        tp2: signal.tp2 as number,
+        tp3: signal.tp3 as number,
+        strength: signal.signalStrength,
+      },
+      marks,
+    );
+    setDone(pos ? `Simulated ${pos.direction} opened: ${size.toFixed(4)} ${coin} @ ${fmt(entry)}.` : "Already have an open simulated position on this coin.");
+    setOpen(false);
+  };
+
+  return (
+    <span>
+      <button onClick={() => { setDone(null); setOpen(true); }} className="rounded-xl bg-cyan-500 px-3 py-1.5 text-xs font-bold text-slate-950 hover:bg-cyan-400">
+        TAKE PAPER TRADE
+      </button>
+      {done && <span className="ml-2 text-[11px] text-slate-400">{done} <Link to="/paper" className="font-bold text-cyan-300 hover:underline">View →</Link></span>}
+      {open && (
+        <span className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setOpen(false)}>
+          <span className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-5" onClick={(e) => e.stopPropagation()}>
+            <p className="text-sm font-extrabold text-white">Confirm simulated trade <span className="text-amber-300">(NO REAL ORDER)</span></p>
+            <div className="mt-3 space-y-1.5 font-mono text-[13px]">
+              {[
+                ["Direction", signal.direction],
+                ["Entry (live mark)", fmt(entry)],
+                ["Invalidation", fmt(signal.invalidation)],
+                ["TP1 / TP2 / TP3", `${fmt(signal.tp1)} / ${fmt(signal.tp2)} / ${fmt(signal.tp3)}`],
+                ["Risk", `$${risk.toFixed(2)} (${(cfg.riskPerTrade * 100).toFixed(2)}% of paper equity)`],
+                ["Position size", `${size.toFixed(4)} ${coin} ≈ $${(size * entry).toFixed(2)} notional`],
+              ].map(([k, v]) => (
+                <span key={k as string} className="flex items-center justify-between border-b border-dashed border-slate-800 pb-1.5">
+                  <span className="font-sans text-slate-500">{k}</span>
+                  <span className="font-bold text-slate-100">{v}</span>
+                </span>
+              ))}
+            </div>
+            <span className="mt-4 flex gap-2">
+              <button onClick={confirm} className="flex-1 rounded-xl bg-cyan-500 px-4 py-2.5 text-sm font-bold text-slate-950 hover:bg-cyan-400">
+                Confirm simulation
+              </button>
+              <button onClick={() => setOpen(false)} className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-bold text-slate-300">
+                Cancel
+              </button>
+            </span>
+          </span>
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -439,7 +520,10 @@ export default function CoinAnalysis() {
             )}
 
             <div>
-              <p className="text-xs font-bold tracking-widest text-slate-500 uppercase">Trade Plan</p>
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-bold tracking-widest text-slate-500 uppercase">Trade Plan</p>
+                <TakePaperTrade signal={signal} coin={coin} mark={market?.markPrice ?? null} />
+              </div>
               <div className="mt-2 grid grid-cols-2 gap-2 font-mono text-[13px] sm:grid-cols-4">
                 {[
                   ["Entry", signal.entryLow !== null ? `${fmt(signal.entryLow)} – ${fmt(signal.entryHigh)}` : "—"],

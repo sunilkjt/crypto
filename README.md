@@ -1,8 +1,8 @@
-# CryptoIn AI Signal — Phase 5 (Advanced Scanner + Signal Intelligence) ✅
+# CryptoIn AI Signal — Phase 6 (Backtesting + Paper Trading) ✅
 
-Live data + deterministic engine + explanatory AI + full-market scanning.
-**No real-money trading, no orders, no leverage, no account connection.
-Ranks are confluence, never investment advice or success probabilities.**
+Strategy laboratory on the deterministic engine. **Simulation only: no exchange
+accounts, no orders, no keys, no automation of real money — the words "paper"
+and "simulation" are on every related screen.**
 
 Tech: React + TypeScript + Vite + Tailwind CSS v4 + Recharts + React Router + Lucide + Vitest.
 
@@ -100,7 +100,36 @@ only endpoint URLs (see `.env.example`); audit grep clean.
   refetch; stale feed pauses new scans; AI called only on coin pages.
 - `ScanProvider` at app root: ONE scan feeds Scanner/Bounce/Dashboard/History.
 
-- [x] Tests (mocked, 154 passing) + `npm run build` green
+- [x] Tests (mocked, 154 passing) + `npm run build` green (Phase 5 baseline)
+
+## Phase 6 completed — backtesting + paper trading (simulation only)
+
+- Backtest (`src/backtest/`): replay of historical `candleSnapshot` ranges
+  through the EXACT live engine (`buildSignal` on strictly historical prefixes;
+  higher TFs resampled without future data; trailing 400-bar window).
+- Same-candle rule: a bar touching stop AND target exits the STOP first
+  (conservative, documented in UI). Entry fills at next-bar open + slippage.
+  Thirds scale-out at TP1/2/3; remainder stops or expires at range end.
+- Costs: configurable fee (default 5 bps/side) + slippage (default 0.05%/side),
+  both printed on every result. Funding via `fundingHistory` applied while
+  open; labeled unavailable when absent — never fabricated.
+- Sizing: risk% × balance / stop distance → size/notional/margin; leverage
+  scales margin/exposure only, never the edge. One position at a time.
+- Metrics: trades, wins/losses, win rate, avg/median R, profit factor, net PnL,
+  return %, max DD + %, avg/best/worst, avg hold, TP1/2/3 + invalidation rates;
+  equity + drawdown Recharts; sortable/filterable trade table; breakdowns by
+  strength/setup/direction; IN-SAMPLE vs OUT-OF-SAMPLE labels; 30d/7d rolling
+  walk-forward; multi-symbol compare (BTC/ETH/OP…).
+- Look-ahead tripwires: resample purity + prefix identity + full-vs-truncated
+  replay agreement tests that fail on any future read.
+- Paper (`src/paper/` + `#/paper`): $1000/1% account, TAKE PAPER TRADE from
+  coin signals with confirmation (fills at live mark), OPEN→TP1/2/3→STOPPED/
+  CLOSED lifecycle on live ticks, manual close, AUTO PAPER TRADING toggle
+  (sim only), position chart with Entry/SL/TP overlays, history filters,
+  performance incl. TP rates, two-step RESET, localStorage persistence with a
+  replaceable storage interface. No keys/credentials requested or stored.
+
+- [x] Tests (mocked, 168 passing) + `npm run build` green
 
 ## Hyperliquid data sources (public only)
 
@@ -172,6 +201,14 @@ src/signals/          # setupType (+stable IDs), lifecycle, outcomes (R),
 src/scanner/          # eligibility, engine (bounded full-market scan),
                       # ScanContext (shared results, refresh, journal+alerts)
   __tests__/          # filtering, ranking, breadth, isolation (mocked fetch)
+src/backtest/         # types, data (chunked history + funding), simulation
+                      # (prefix replay, thirds exits, costs), metrics, engine
+                      # (train/test, walk-forward, multi-symbol)
+  __tests__/          # sizing, LONG/SHORT, TP/SL, conflict rule, fees,
+                      # slippage, funding, metrics, look-ahead tripwires
+src/paper/            # types, portfolio (pure lifecycle math), engine
+                      # (account, persistence, auto-sim), singleton
+  __tests__/          # lifecycle, engine accounting, secret-free persistence
 ```
 
 Rules: UI never touches `fetch` or raw shapes — only `useMarkets()`, `useCandles()`, `getMarkets()`, `getCandles()`, formatters.
@@ -180,7 +217,7 @@ Rules: UI never touches `fetch` or raw shapes — only `useMarkets()`, `useCandl
 
 ```bash
 npm install
-npm test        # vitest run — 154 mocked unit tests
+npm test        # vitest run — 168 mocked unit tests
 npm run build   # tsc -b && vite build
 npm run dev     # http://localhost:5173
 ```
@@ -194,7 +231,9 @@ Verify: `#/scanner` (filters, 6 sorts, refresh modes, stale pause) → `#/bounce
 - `/coin/:symbol` — signal state chip, setup type, component bars, regime/breadth context, past outcomes, AI + news + history link
 - `/bounce` — full-universe bounce scan with bounce-score components + catalyst column
 - `/history` — journal with lifecycle filters, outcome touches, refresh-outcomes (bounded), clear
-- `/backtest`, `/paper`, `/settings` — unchanged shells (out of scope)
+- `/backtest` — config (symbol/TF/dates/balance/risk/fee/slippage/leverage/train-test/walk-forward, multi-symbol compare), metrics, equity/drawdown charts, sortable trade table, strength/setup breakdowns
+- `/paper` — PAPER/SIMULATION banners, account config, auto-toggle, open positions with live R, position chart overlays, history filters, performance, two-step reset
+- `/settings` — unchanged shell (out of scope)
 
 ## Known limitations
 
