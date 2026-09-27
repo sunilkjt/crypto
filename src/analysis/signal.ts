@@ -27,6 +27,7 @@ import {
   type StrengthClass,
 } from "./scoring";
 import { buildTradePlan } from "./tradeplan";
+import { MAX_EXTENSION_ATR, MAX_RISK_ATR, MIN_RISK_REWARD } from "../signals/quality";
 
 /**
  * Unified signal object — the single shape the UI consumes.
@@ -56,6 +57,16 @@ export interface Signal {
   rsi: number | null;
   volume: VolumeLabel | "INSUFFICIENT";
   marketStructure: StructureLabel | "INSUFFICIENT";
+  /** Close-confirmed breakout state (wicks never count). */
+  brokeAbove: boolean;
+  brokeBelow: boolean;
+  retestHeld: boolean;
+  /** Stop distance in ATR multiples (null without a plan). */
+  riskAtr: number | null;
+  /** ATR as % of price (volatility gauge). */
+  atrPct: number | null;
+  /** Failed-breakout trap flag on the signal side. */
+  falseBreakout: boolean;
   multiTimeframe: MtfResult | null;
   components: ScoreComponents;
   bounce: BounceResult | null;
@@ -107,6 +118,12 @@ export function buildSignal(input: BuildSignalInput): { status: SignalStatus; si
       rsi: null,
       volume: "INSUFFICIENT",
       marketStructure: "INSUFFICIENT",
+      brokeAbove: false,
+      brokeBelow: false,
+      retestHeld: false,
+      riskAtr: null,
+      atrPct: null,
+      falseBreakout: false,
       multiTimeframe: null,
       components: { trend: 0, momentum: 0, volume: 0, structure: 0, mtf: 0 },
       bounce: null,
@@ -315,13 +332,39 @@ export function buildSignal(input: BuildSignalInput): { status: SignalStatus; si
       direction = "WAIT";
       warnings.push("No valid trade structure (levels/invalidation) — WAIT. Never force a trade.");
     } else {
-      entryLow = plan.entryLow;
-      entryHigh = plan.entryHigh;
-      invalidation = plan.invalidation;
-      tp1 = plan.tp1;
-      tp2 = plan.tp2;
-      tp3 = plan.tp3;
-      riskReward = plan.riskReward;
+      // Risk/reward gate: poor value, an excessive stop, or a chased entry
+      // kills the setup — WAIT — POOR RISK/REWARD rather than forcing it.
+      const entryMid = (plan.entryLow + plan.entryHigh) / 2;
+      const stopDist =
+        direction === "LONG" ? entryMid - plan.invalidation : plan.invalidation - entryMid;
+      const riskAtr = stopDist / (atr as number);
+      const refLevel =
+        direction === "LONG"
+          ? (levels.nearestSupport?.price ?? structure.lastSwingLow)
+          : (levels.nearestResistance?.price ?? structure.lastSwingHigh);
+      const extensionAtr =
+        refLevel !== null && refLevel !== undefined
+          ? Math.abs(price - refLevel) / (atr as number)
+          : 0;
+      if (extensionAtr > MAX_EXTENSION_ATR) {
+        direction = "WAIT";
+        warnings.push(
+          `WAIT — POOR RISK/REWARD (chasing: price ${extensionAtr.toFixed(1)} ATR from the level).`,
+        );
+      } else if (plan.riskReward < MIN_RISK_REWARD || riskAtr > MAX_RISK_ATR) {
+        direction = "WAIT";
+        warnings.push(
+          `WAIT — POOR RISK/REWARD (R:R ${plan.riskReward}, stop ${riskAtr.toFixed(1)} ATR).`,
+        );
+      } else {
+        entryLow = plan.entryLow;
+        entryHigh = plan.entryHigh;
+        invalidation = plan.invalidation;
+        tp1 = plan.tp1;
+        tp2 = plan.tp2;
+        tp3 = plan.tp3;
+        riskReward = plan.riskReward;
+      }
     }
   } else {
     reasons.push(...bounce.bounceReasons);
@@ -348,6 +391,16 @@ export function buildSignal(input: BuildSignalInput): { status: SignalStatus; si
       rsi: rsiNow,
       volume: volumeP.label,
       marketStructure: structure.label,
+      brokeAbove: structure.brokeAbove,
+      brokeBelow: structure.brokeBelow,
+      retestHeld: structure.retestHeldAbove || structure.retestHeldBelow,
+      riskAtr:
+        entryLow !== null && invalidation !== null && direction !== "WAIT"
+          ? Math.abs((entryLow + (entryHigh ?? entryLow)) / 2 - invalidation) / (atr as number)
+          : null,
+      atrPct: Math.round(((atr as number) / price) * 10000) / 100,
+      falseBreakout:
+        direction === "LONG" ? structure.falseBreakoutUp : structure.falseBreakoutDown,
       multiTimeframe: mtf,
       components: scored.components,
       bounce,

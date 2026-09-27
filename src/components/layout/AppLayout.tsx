@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import {
   ArrowUpFromDot,
+  Bell,
   Briefcase,
   CandlestickChart,
   FlaskConical,
@@ -17,6 +18,12 @@ import { cn } from "../../lib/cn";
 import { APP_NAME } from "../../types";
 import { useMarkets } from "../../market/store";
 import { ConnectionBadge, ConnectionLine } from "../ConnectionBadge";
+import {
+  markAllNotificationsRead,
+  subscribeNotifications,
+  unreadCount,
+  type SignalNotification,
+} from "../../signals/notifications";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
@@ -102,7 +109,12 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
 
 export default function AppLayout() {
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [notes, setNotes] = useState<SignalNotification[]>([]);
   const { markets } = useMarkets();
+
+  useEffect(() => subscribeNotifications(setNotes), []);
+  const unread = unreadCount(notes);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 lg:flex">
@@ -182,6 +194,44 @@ export default function AppLayout() {
                 <ConnectionLine />
               </span>
               <ConnectionBadge />
+              <div className="relative">
+                <button
+                  aria-label="Signal notifications"
+                  onClick={() => {
+                    setNotesOpen((o) => !o);
+                    if (!notesOpen) markAllNotificationsRead();
+                  }}
+                  className="relative rounded-lg border border-slate-800 p-2 text-slate-300 hover:bg-slate-900"
+                >
+                  <Bell className="h-4 w-4" />
+                  {unread > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-cyan-400 px-1 text-[10px] font-bold text-slate-950">
+                      {unread}
+                    </span>
+                  )}
+                </button>
+                {notesOpen && (
+                  <div className="absolute right-0 z-50 mt-2 max-h-80 w-80 overflow-y-auto rounded-xl border border-slate-800 bg-slate-900 p-2 shadow-2xl">
+                    <p className="px-2 py-1 text-[11px] font-bold tracking-widest text-slate-500 uppercase">
+                      Signal events (in-app only)
+                    </p>
+                    {notes.length === 0 ? (
+                      <p className="px-2 py-4 text-center text-xs text-slate-500">
+                        No high-confluence events yet. The scanner emits here on NEW setups and material changes — never per refresh.
+                      </p>
+                    ) : (
+                      notes.slice(0, 20).map((n) => (
+                        <div key={n.id} className="rounded-lg px-2 py-1.5 hover:bg-slate-800/60">
+                          <p className="text-xs text-slate-200">{n.message}</p>
+                          <p className="text-[10px] text-slate-500">
+                            {n.kind === "NEW_SETUP" ? "New setup" : "State change"} · {new Date(n.at).toLocaleTimeString()}
+                          </p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </header>

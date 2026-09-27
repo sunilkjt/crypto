@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Card, CardHeader, DemoBadge, DirectionBadge, PageHeader, Stat } from "../components/ui";
 import { AiAnalysisCard } from "../components/AiAnalysisCard";
@@ -26,10 +26,112 @@ import {
   formatVolumeNotional,
 } from "../lib/format";
 import { cn } from "../lib/cn";
+import { classifySetupType } from "../signals/setupType";
+import { assessQuality } from "../signals/quality";
+import { loadJournal } from "../signals/journal";
+import { summarizeRegime } from "../ai/regime";
+import { backfillAiSummary } from "../signals/journal";
+import { useScan } from "../scanner";
+import type { Signal } from "../analysis/signal";
 
 function fmt(n: number | null, digits = 4): string {
   if (n === null || !Number.isFinite(n)) return "—";
   return n.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
+/** Lifecycle state of the latest journaled setup for this coin+direction. */
+function CoinSignalState({ symbol, direction }: { symbol: string; direction: string }) {
+  if (direction !== "LONG" && direction !== "SHORT") return null;
+  const latest = loadJournal()
+    .filter((e) => e.symbol === symbol && e.direction === direction)
+    .sort((a, b) => b.lastSeen - a.lastSeen)[0];
+  if (!latest) return <span className="rounded bg-slate-800 px-2 py-0.5 font-mono text-[11px] text-slate-400">UNTRACKED</span>;
+  return (
+    <span className="rounded bg-cyan-400/10 px-2 py-0.5 font-mono text-[11px] font-bold text-cyan-300" title={`Setup ${latest.setupType} · first seen ${new Date(latest.firstSeen).toLocaleString()}`}>
+      {latest.status}
+    </span>
+  );
+}
+
+/** Component point bars: Trend/25 Momentum/20 Volume/15 Structure/20 MTF/20. */
+function SignalComponents({ signal }: { signal: Signal }) {
+  const setupType = classifySetupType(signal);
+  const quality = assessQuality(signal);
+  const bars: [string, number, number][] = [
+    ["Trend", signal.components.trend, 25],
+    ["Momentum", signal.components.momentum, 20],
+    ["Volume", signal.components.volume, 15],
+    ["Structure", signal.components.structure, 20],
+    ["MTF", signal.components.mtf, 20],
+  ];
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Setup: {setupType}</p>
+        <span className="rounded bg-slate-800 px-2 py-0.5 text-[11px] font-bold text-slate-300">{quality}</span>
+      </div>
+      <div className="mt-2.5 space-y-1.5">
+        {bars.map(([label, value, max]) => (
+          <div key={label} className="flex items-center gap-2 text-[11px]">
+            <span className="w-20 shrink-0 font-bold tracking-wider text-slate-500 uppercase">{label}</span>
+            <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-800">
+              <span className="block h-full rounded-full bg-cyan-400" style={{ width: `${Math.min(100, (value / max) * 100)}%` }} />
+            </span>
+            <span className="w-14 shrink-0 text-right font-mono text-slate-300">{value}/{max}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Regime + breadth context chips — context only, never overrides. */
+function MarketContextStrip() {
+  const { markets } = useMarkets();
+  const { summary } = useScan();
+  const regime = summarizeRegime(markets);
+  const breadth = summary?.breadth;
+  return (
+    <div className="flex flex-wrap gap-2 text-[11px]">
+      <span className="rounded-full border border-slate-800 bg-slate-950 px-3 py-1 text-slate-300">
+        Market regime: <strong>{regime.regime}</strong> <span className="text-slate-600">(context only)</span>
+      </span>
+      {breadth && breadth.counted > 0 && (
+        <span className="rounded-full border border-slate-800 bg-slate-950 px-3 py-1 font-mono text-slate-300">
+          Breadth {breadth.bullishPct}% / {breadth.neutralPct}% / {breadth.bearishPct}%
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Past journaled outcomes for this coin (observed touches, not profits). */
+function CoinOutcomes({ symbol }: { symbol: string }) {
+  const entries = loadJournal()
+    .filter((e) => e.symbol === symbol)
+    .sort((a, b) => b.lastSeen - a.lastSeen)
+    .slice(0, 5);
+  if (entries.length === 0) return null;
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+      <p className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Historical outcomes · {symbol}</p>
+      <ul className="mt-2 space-y-1.5 text-xs">
+        {entries.map((e) => (
+          <li key={e.id} className="flex flex-wrap items-center gap-2 text-slate-300">
+            <span className={cn("font-bold", e.direction === "LONG" ? "text-emerald-300" : "text-rose-300")}>{e.direction}</span>
+            <span className="font-mono">{e.strength}</span>
+            <span className="rounded bg-slate-800 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">{e.status}</span>
+            {e.outcome && (
+              <span className="font-mono text-[11px] text-slate-500">
+                T1{e.outcome.tp1Reached ? "✓" : "·"} T2{e.outcome.tp2Reached ? "✓" : "·"} T3{e.outcome.tp3Reached ? "✓" : "·"} X{e.outcome.invalidationReached ? "✓" : "·"} · MFE {e.outcome.mfeR}R
+              </span>
+            )}
+            <span className="ml-auto text-slate-600">{new Date(e.firstSeen).toLocaleDateString()}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 export default function CoinAnalysis() {
@@ -93,6 +195,18 @@ export default function CoinAnalysis() {
     }
   }, [signal, mktStale, coin, market, mtf, newsItems]);
   const ai = useAiAnalysis(aiInput, "15m", aiInput !== null);
+
+  // Lazy journal backfill: the coin explanation enriches logged signals.
+  useEffect(() => {
+    if (
+      ai.state === "ok" &&
+      ai.analysis &&
+      signal &&
+      (signal.direction === "LONG" || signal.direction === "SHORT")
+    ) {
+      backfillAiSummary(coin, signal.direction, ai.analysis.summary);
+    }
+  }, [ai.state, ai.analysis, signal, coin]);
 
   return (
     <div>
@@ -283,10 +397,14 @@ export default function CoinAnalysis() {
             <div className="flex flex-wrap items-baseline gap-3">
               <span className="font-mono text-3xl font-extrabold text-white">{signal.signalStrength}</span>
               <span className="text-sm font-bold text-cyan-300">{signal.classification}</span>
+              <CoinSignalState symbol={coin} direction={signal.direction} />
               <span className="ml-auto font-mono text-xs text-slate-500">
                 LONG {signal.longScore} · SHORT {signal.shortScore}
               </span>
             </div>
+
+            <SignalComponents signal={signal} />
+            <MarketContextStrip />
 
             <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
               {[
@@ -357,6 +475,7 @@ export default function CoinAnalysis() {
                 </ul>
               </div>
             </div>
+            <CoinOutcomes symbol={coin} />
           </div>
         )}
       </Card>

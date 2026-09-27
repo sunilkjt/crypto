@@ -77,6 +77,15 @@ describe("regime summary", () => {
     expect(summarizeRegime(flat).regime).toBe("NEUTRAL");
   });
 
+  it("flags high volatility independently of direction", () => {
+    const wild = Array.from({ length: 20 }, (_, i) =>
+      market(i === 0 ? "BTC" : `C${i}`, i % 2 === 0 ? 8 : -8),
+    );
+    const r = summarizeRegime(wild);
+    expect(r.volatility).toBe("HIGH VOLATILITY");
+    expect(r.explanation).toMatch(/high volatility/);
+  });
+
   it("admits insufficient coverage honestly", () => {
     expect(summarizeRegime([]).explanation).toMatch(/Data unavailable/);
     expect(summarizeRegime([market("BTC", 5)]).marketsCounted).toBe(0);

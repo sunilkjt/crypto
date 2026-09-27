@@ -1,8 +1,8 @@
-# CryptoIn AI Signal — Phase 4 (AI Market Analyst + News Intelligence) ✅
+# CryptoIn AI Signal — Phase 5 (Advanced Scanner + Signal Intelligence) ✅
 
-Deterministic technical engine + explanatory AI layer. **The engine remains the
-source of truth: the AI explains supplied numbers, never calculates or overrides
-them. No real trading, no automated orders, no paper trading in this phase.**
+Live data + deterministic engine + explanatory AI + full-market scanning.
+**No real-money trading, no orders, no leverage, no account connection.
+Ranks are confluence, never investment advice or success probabilities.**
 
 Tech: React + TypeScript + Vite + Tailwind CSS v4 + Recharts + React Router + Lucide + Vitest.
 
@@ -73,7 +73,34 @@ Dashboard gains a deterministic AI MARKET REGIME (BTC/ETH/breadth/chop).
 Security: no keys/tokens/secrets in code, `VITE_*`, `public/`, or history —
 only endpoint URLs (see `.env.example`); audit grep clean.
 
-- [x] Tests (mocked, 126 passing) + `npm run build` green
+- [x] Tests (mocked, 126 passing) + `npm run build` green (Phase 4 baseline)
+
+## Phase 5 completed — full-market scanner + signal intelligence
+
+- Scan engine (`src/scanner/`): eligibility gates (min $250k 24h volume, top-N
+  universe 20/40/60, delisted excluded upstream), one bounded batch per coin
+  (4 TF fetches, 8 concurrent), per-coin error isolation, honest counts
+  (scanned / excluded with reasons / valid setups), breadth from scored signals.
+- Setup types: BOUNCE (detector agreement) / BREAKOUT / BREAKDOWN
+  (close-confirmed + non-weak volume) / PULLBACK / REVERSAL / TREND / RANGE.
+- Bounce components displayed: support/25 momentum/35 volume/15 structure/5
+  MTF/25. False breakouts surface as warnings, never auto-reversals.
+- Quality: LOW/MEDIUM/HIGH from confluence + MTF + R:R + stop size +
+  volatility + trap check. Core R:R gate: R:R < 1.5, stop > 4 ATR, or entry
+  extended > 6 ATR → WAIT — POOR RISK/REWARD (never forced).
+- Lifecycle: NEW → ACTIVE → STRENGTHENING/WEAKENING → INVALIDATED/COMPLETED
+  (±5 strength moves, price-vs-invalidation/TP3 evidence, terminal states stick).
+- Dedupe: stable `SYMBOL|DIR|TF|SETUP|anchorTs` IDs; new ID only on material change.
+- Journal (`#/history`, localStorage): full setup record + lifecycle + outcome
+  touches (TP1/2/3, invalidation, MFE/MAE in R, time-to-touch) + lazy AI summary.
+- Notifications: in-app bell, NEW ≥ STRONG SETUP + material transitions only.
+- Regime v2 (BULLISH/NEUTRAL/BEARISH + HIGH VOLATILITY flag, context only) and
+  scanned-data breadth on Dashboard, coin pages, and scanner.
+- Refresh control OFF/30s/1m/5m + universe size + setup-TF rescoring without
+  refetch; stale feed pauses new scans; AI called only on coin pages.
+- `ScanProvider` at app root: ONE scan feeds Scanner/Bounce/Dashboard/History.
+
+- [x] Tests (mocked, 154 passing) + `npm run build` green
 
 ## Hyperliquid data sources (public only)
 
@@ -139,6 +166,12 @@ src/ai/                # analyst: types, prompts, validate, input, cache,
 src/news/             # types, relevance maps, provider (empty/http),
                       # aggregator, useNews/useNewsBatch
   __tests__/          # normalization, relevance, sentiment, ordering
+src/signals/          # setupType (+stable IDs), lifecycle, outcomes (R),
+                      # quality (+R:R/extension gates), journal, notifications
+  __tests__/          # state machine, dedupe, outcomes, quality, journal, bell
+src/scanner/          # eligibility, engine (bounded full-market scan),
+                      # ScanContext (shared results, refresh, journal+alerts)
+  __tests__/          # filtering, ranking, breadth, isolation (mocked fetch)
 ```
 
 Rules: UI never touches `fetch` or raw shapes — only `useMarkets()`, `useCandles()`, `getMarkets()`, `getCandles()`, formatters.
@@ -147,20 +180,21 @@ Rules: UI never touches `fetch` or raw shapes — only `useMarkets()`, `useCandl
 
 ```bash
 npm install
-npm test        # vitest run — 126 mocked unit tests
+npm test        # vitest run — 154 mocked unit tests
 npm run build   # tsc -b && vite build
 npm run dev     # http://localhost:5173
 ```
 
-Verify: Dashboard (regime card) → Scanner → `/coin/OP` (AI blocks populated LOCAL, news empty-state honest) → `#/bounce` (Catalyst column) → kill network (technicals live, AI unavailable) → stale data (no fresh AI calls).
+Verify: `#/scanner` (filters, 6 sorts, refresh modes, stale pause) → `#/bounce` (components, catalysts) → `#/history` (lifecycle, outcome refresh) → `#/coin/OP` (state chip, components, regime/breadth, outcomes, AI, news) → bell notifications on new ≥75 setups → kill subsystems one by one (AI/news/coin/API) for isolation.
 
 ## Pages
 
-- `/` Dashboard — live BTC/ETH/majors + snapshot + deterministic AI MARKET REGIME; signal cards stay `PHASE 5+` placeholders
-- `/scanner` — live table + deterministic 15m signals per row: Coin/Price/24h%/Trend/RSI/Volume/Structure/MTF/Signal/Strength
-- `/coin/:symbol` — live KPIs + candles + real EMA/RSI/MACD/ATR + trend/structure/levels + LONG/SHORT/WAIT signal with entry/invalidation/TPs/R:R + AI MARKET ANALYSIS (9 blocks, timestamps) + RECENT VERIFIED NEWS + history link
-- `/bounce` — top-25 volume scan with full MTF scoring; honest empty state when nothing qualifies
-- `/history`, `/backtest`, `/paper`, `/settings` — unchanged shells (out of scope)
+- `/` Dashboard — regime + breadth + high-confluence longs/shorts + bounce/breakout strips + recent signals + data status
+- `/scanner` — HIGH-CONFLUENCE SETUPS over the eligible universe: 13 columns, direction/setup/strength/volume filters, 6 sorts (default Strength ↓), refresh + universe + TF controls
+- `/coin/:symbol` — signal state chip, setup type, component bars, regime/breadth context, past outcomes, AI + news + history link
+- `/bounce` — full-universe bounce scan with bounce-score components + catalyst column
+- `/history` — journal with lifecycle filters, outcome touches, refresh-outcomes (bounded), clear
+- `/backtest`, `/paper`, `/settings` — unchanged shells (out of scope)
 
 ## Known limitations
 

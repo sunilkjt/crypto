@@ -9,6 +9,8 @@ import type { Market } from "../market/hyperliquid/types";
 
 export interface RegimeSummary {
   regime: "BULLISH" | "NEUTRAL" | "BEARISH";
+  /** Independent volatility flag — wild markets overlay any regime. */
+  volatility: "NORMAL" | "HIGH VOLATILITY";
   explanation: string;
   btcChangePct: number | null;
   ethChangePct: number | null;
@@ -20,6 +22,7 @@ export interface RegimeSummary {
 export function summarizeRegime(markets: Market[]): RegimeSummary {
   const empty: RegimeSummary = {
     regime: "NEUTRAL",
+    volatility: "NORMAL",
     explanation: "Data unavailable — not enough market coverage to assess regime.",
     btcChangePct: null,
     ethChangePct: null,
@@ -44,6 +47,7 @@ export function summarizeRegime(markets: Market[]): RegimeSummary {
   if (eth !== null) score += Math.max(-2, Math.min(2, eth / 2));
   score += (breadth - 50) / 25; // ±2 at full breadth extremes
   const regime = score >= 1.5 ? "BULLISH" : score <= -1.5 ? "BEARISH" : "NEUTRAL";
+  const volatility = median > 4 ? "HIGH VOLATILITY" : "NORMAL";
 
   const parts = [
     `BTC ${fmtSigned(btc)} / ETH ${fmtSigned(eth)} on 24h`,
@@ -52,7 +56,8 @@ export function summarizeRegime(markets: Market[]): RegimeSummary {
   ];
   return {
     regime,
-    explanation: `${regime[0]}${regime.slice(1).toLowerCase()} regime: ${parts.join("; ")}. Computed from supplied market data only.`,
+    volatility,
+    explanation: `${regime[0]}${regime.slice(1).toLowerCase()} regime${volatility === "HIGH VOLATILITY" ? " under high volatility" : ""}: ${parts.join("; ")}. Computed from supplied market data only.`,
     btcChangePct: btc,
     ethChangePct: eth,
     breadthUpPct: Math.round(breadth * 10) / 10,

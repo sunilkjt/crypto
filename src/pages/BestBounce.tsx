@@ -1,16 +1,15 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { Card, CardHeader, EmptyState, PageHeader } from "../components/ui";
 import { ConnectionBadge, ConnectionLine } from "../components/ConnectionBadge";
 import { FreshnessLabel } from "../components/LiveBadge";
+import { timeAgo } from "../components/NewsList";
 import { useMarkets } from "../market/store";
-import { isListableBounce, type Signal } from "../analysis/signal";
-import { useSignalBatch } from "../analysis/hooks";
+import { isListableBounce } from "../analysis/signal";
+import { REFRESH_OPTIONS, useScan } from "../scanner";
 import { useNewsBatch } from "../news/useNews";
 import { formatPriceUsd } from "../lib/format";
 import { cn } from "../lib/cn";
-
-const SCAN_UNIVERSE = 25;
 
 function fmt(n: number | null): string {
   if (n === null || !Number.isFinite(n)) return "—";
@@ -18,40 +17,26 @@ function fmt(n: number | null): string {
 }
 
 export default function BestBounce() {
-  const { markets, error, stale, updatedAt, refresh } = useMarkets();
-  const [scanOn, setScanOn] = useState(true);
+  const { markets, error, updatedAt } = useMarkets();
+  const {
+    summary, scanning, progress, setupTimeframe,
+    refreshMs, setRefreshMs, refresh, pausedStale,
+  } = useScan();
 
-  // Scan universe: top N by 24h notional volume. No hardcoded coin list.
-  const universe = useMemo(
-    () =>
-      [...markets]
-        .filter((m) => (m.dayVolumeNotional ?? 0) > 0)
-        .sort((a, b) => (b.dayVolumeNotional ?? 0) - (a.dayVolumeNotional ?? 0))
-        .slice(0, SCAN_UNIVERSE)
-        .map((m) => m.symbol),
-    [markets],
-  );
-
-  const { entries, loading, done, total } = useSignalBatch(scanOn && !stale ? universe : []);
-
-  const setups: { signal: Signal; price: number | null }[] = useMemo(() => {
+  const setups = useMemo(() => {
     const prices = new Map(markets.map((m) => [m.symbol, m.markPrice]));
-    return entries
-      .filter((e) => e.signal !== null && isListableBounce(e.signal))
-      .map((e) => ({ signal: e.signal as Signal, price: prices.get(e.symbol) ?? null }))
-      .sort((a, b) => b.signal.signalStrength - a.signal.signalStrength);
-  }, [entries, markets]);
+    return (summary?.results ?? [])
+      .filter((r) => isListableBounce(r.signal))
+      .map((r) => ({ signal: r.signal, setupType: r.setupType, quality: r.quality, price: prices.get(r.symbol) ?? null }));
+  }, [summary, markets]);
 
-  const failed = entries.filter((e) => e.error !== null).length;
-
-  // Catalyst per listed setup (instantly empty without a news backend).
   const catalystBySymbol = useNewsBatch(useMemo(() => setups.map((s) => s.signal.symbol), [setups]));
 
   return (
     <div>
       <PageHeader
         title="BEST BOUNCE"
-        description="Scanning for potential crypto bounce setups using support, momentum, volume and multi-timeframe confirmation."
+        description="Potential bounce setups: support, RSI recovery, MACD improvement, volume confirmation, structure, and higher/lower timeframe alignment."
         right={
           <div className="flex items-center gap-2">
             <ConnectionBadge />
@@ -61,79 +46,74 @@ export default function BestBounce() {
 
       <Card>
         <CardHeader
-          title={`Bounce Scan · top ${SCAN_UNIVERSE} by volume`}
-          subtitle="Full 4-timeframe deterministic scoring per market — no invented setups"
+          title={`Bounce Scan · full eligible universe (${setupTimeframe} setup)`}
+          subtitle="Bounce detector + signal agreement required — no invented setups"
           right={<ConnectionLine />}
         />
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-800/70 px-4 py-3 text-xs text-slate-400">
-          {stale ? (
+          {pausedStale ? (
             <span className="font-bold text-amber-300">DATA STALE — scanning paused until the feed recovers.</span>
-          ) : loading ? (
+          ) : scanning ? (
             <span>
-              Scoring {done}/{total} markets…
+              Scoring {progress.done}/{progress.total} markets…
               <span className="ml-2 inline-block h-3 w-40 overflow-hidden rounded-full bg-slate-800 align-middle">
                 <span
                   className="block h-full bg-cyan-400 transition-all"
-                  style={{ width: total > 0 ? `${(done / total) * 100}%` : "0%" }}
+                  style={{ width: progress.total > 0 ? `${(progress.done / progress.total) * 100}%` : "0%" }}
                 />
               </span>
             </span>
-          ) : (
+          ) : summary ? (
             <span>
-              Scored {done}/{total} · {setups.length} listable setup{setups.length === 1 ? "" : "s"} ·{" "}
-              {failed > 0 ? `${failed} failed (skipped, never guessed)` : "no failures"}
+              {summary.scanned} scored · {setups.length} bounce setup{setups.length === 1 ? "" : "s"} ·{" "}
+              last scan {timeAgo(summary.completedAt)}
             </span>
+          ) : (
+            <span>Preparing scan…</span>
           )}
           <span className="ml-auto flex items-center gap-2">
             <FreshnessLabel updatedAt={updatedAt} />
-            <button
-              onClick={() => {
-                setScanOn(false);
-                refresh();
-                window.setTimeout(() => setScanOn(true), 50);
-              }}
-              className="rounded-lg border border-slate-700 px-3 py-1.5 font-bold text-slate-200 hover:bg-slate-800"
-            >
+            {REFRESH_OPTIONS.map((o) => (
+              <button
+                key={o.label}
+                onClick={() => setRefreshMs(o.ms)}
+                className={cn("rounded-lg border px-2 py-1 font-bold", refreshMs === o.ms ? "border-cyan-400/50 bg-cyan-400/10 text-cyan-200" : "border-slate-800 text-slate-500 hover:border-slate-700")}
+              >
+                {o.label === "OFF" ? "OFF" : o.label}
+              </button>
+            ))}
+            <button onClick={refresh} className="rounded-lg border border-slate-700 px-3 py-1 font-bold text-slate-200 hover:bg-slate-800">
               Rescan
-            </button>
-            <button
-              onClick={() => setScanOn((s) => !s)}
-              className="rounded-lg border border-slate-700 px-3 py-1.5 font-bold text-slate-200 hover:bg-slate-800"
-            >
-              {scanOn ? "Pause" : "Resume"}
             </button>
           </span>
         </div>
 
-        {stale ? (
+        {pausedStale ? (
           <EmptyState
             title="DATA STALE"
             message="Market data is stale, so no fresh scan is produced. Last results are withheld rather than presented as live."
             hint="Wait for the feed or press Rescan"
           />
-        ) : loading && setups.length === 0 ? (
-          <EmptyState
-            title="Scanning markets…"
-            message="Fetching 4h/1h/15m/5m candles and scoring each market deterministically."
-          />
+        ) : scanning && setups.length === 0 ? (
+          <EmptyState title="Scanning markets…" message="Scoring every eligible market across 4H/1H/15M/5M." />
         ) : setups.length === 0 ? (
           <EmptyState
             title="No high-confluence bounce setups currently detected."
             message="Scored markets lack the multi-confirmation agreement a bounce requires (level + recovery + momentum + volume + timeframe alignment). Nothing is invented to fill this table."
-            hint={`Scanned ${done} markets · all below bar`}
+            hint={`Scanned ${summary?.scanned ?? 0} markets · all below bar`}
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-left text-sm" style={{ minWidth: 1140 }}>
+            <table className="w-full border-collapse text-left text-sm" style={{ minWidth: 1220 }}>
               <thead>
                 <tr className="border-b border-slate-800 text-[11px] tracking-widest text-slate-500 uppercase">
-                  {["Coin", "Price", "Score", "Dir", "Entry", "Invalidation", "TP1", "TP2", "TP3", "R:R", "Catalyst", "Top reasons"].map((c) => (
+                  {["Coin", "Price", "Bounce", "Score", "Dir", "Entry", "Invalidation", "TP1", "TP2", "TP3", "R:R", "Catalyst", "Components"].map((c) => (
                     <th key={c} className="px-3 py-3 font-semibold whitespace-nowrap">{c}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {setups.map(({ signal: s, price }) => (
+                {setups.map(({ signal: s, setupType, quality, price }) => (
                   <tr key={s.symbol} className="border-b border-slate-800/50 last:border-0 hover:bg-slate-900/50">
                     <td className="px-3 py-2.5">
                       <Link to={`/coin/${s.symbol}`} className="font-bold text-white hover:text-cyan-300">
@@ -142,56 +122,42 @@ export default function BestBounce() {
                       <span className="ml-2 rounded-full bg-cyan-400/10 px-2 py-0.5 text-[10px] font-bold text-cyan-300">
                         {s.classification}
                       </span>
+                      <span className="ml-1 rounded bg-slate-800 px-1.5 py-0.5 font-mono text-[10px] text-slate-400" title={`Quality: ${quality}`}>
+                        {setupType}
+                      </span>
                     </td>
                     <td className="px-3 py-2.5 font-mono text-slate-200">{formatPriceUsd(price, s.symbol)}</td>
+                    <td className="px-3 py-2.5 font-mono font-bold text-cyan-200" title="Bounce checklist score (components below)">
+                      {s.bounce?.bounceScore ?? "—"}
+                    </td>
                     <td className="px-3 py-2.5 font-mono font-bold text-slate-100">{s.signalStrength}</td>
                     <td className="px-3 py-2.5">
-                      <span
-                        className={cn(
-                          "inline-flex rounded-md border px-2 py-0.5 text-[11px] font-bold",
-                          s.direction === "LONG" && "border-emerald-400/30 bg-emerald-400/10 text-emerald-300",
-                          s.direction === "SHORT" && "border-rose-400/30 bg-rose-400/10 text-rose-300",
-                        )}
-                      >
+                      <span className={cn("inline-flex rounded-md border px-2 py-0.5 text-[11px] font-bold", s.direction === "LONG" && "border-emerald-400/30 bg-emerald-400/10 text-emerald-300", s.direction === "SHORT" && "border-rose-400/30 bg-rose-400/10 text-rose-300")}>
                         {s.direction}
                       </span>
                     </td>
-                    <td className="px-3 py-2.5 font-mono text-xs text-slate-300">
-                      {s.entryLow !== null ? `${fmt(s.entryLow)}–${fmt(s.entryHigh)}` : "—"}
-                    </td>
+                    <td className="px-3 py-2.5 font-mono text-xs text-slate-300">{s.entryLow !== null ? `${fmt(s.entryLow)}–${fmt(s.entryHigh)}` : "—"}</td>
                     <td className="px-3 py-2.5 font-mono text-xs text-slate-300">{fmt(s.invalidation)}</td>
                     <td className="px-3 py-2.5 font-mono text-xs text-slate-300">{fmt(s.tp1)}</td>
                     <td className="px-3 py-2.5 font-mono text-xs text-slate-300">{fmt(s.tp2)}</td>
                     <td className="px-3 py-2.5 font-mono text-xs text-slate-300">{fmt(s.tp3)}</td>
-                    <td className="px-3 py-2.5 font-mono text-xs text-slate-200">
-                      {s.riskReward !== null ? `1:${s.riskReward}` : "—"}
-                    </td>
-                    <td className="max-w-[220px] px-3 py-2.5 text-[11px] leading-snug">
+                    <td className="px-3 py-2.5 font-mono text-xs text-slate-200">{s.riskReward !== null ? `1:${s.riskReward}` : "—"}</td>
+                    <td className="max-w-[200px] px-3 py-2.5 text-[11px] leading-snug">
                       {(() => {
                         const item = catalystBySymbol.get(s.symbol);
                         if (!item) return <span className="text-slate-600">Catalyst: None found</span>;
                         const positive = item.sentiment === "POSITIVE";
                         const negative = item.sentiment === "NEGATIVE";
                         return (
-                          <a
-                            href={item.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            title={`${item.headline} (${item.source})`}
-                            className={cn(
-                              "font-semibold hover:underline",
-                              positive && "text-emerald-300",
-                              negative && "text-rose-300",
-                              !positive && !negative && "text-slate-300",
-                            )}
-                          >
+                          <a href={item.url} target="_blank" rel="noopener noreferrer" title={`${item.headline} (${item.source})`}
+                            className={cn("font-semibold hover:underline", positive && "text-emerald-300", negative && "text-rose-300", !positive && !negative && "text-slate-300")}>
                             Recent {positive ? "positive" : negative ? "negative" : "neutral"} catalyst
                           </a>
                         );
                       })()}
                     </td>
-                    <td className="max-w-[280px] px-3 py-2.5 text-[11px] leading-snug text-slate-400">
-                      {s.reasons.slice(0, 3).join(" · ") || "—"}
+                    <td className="max-w-[260px] px-3 py-2.5 font-mono text-[11px] leading-snug text-slate-400" title="Bounce checklist parts: support/25 momentum/35 volume/15 structure/5 mtf/25">
+                      {s.bounce ? `S${s.bounce.components.support} M${s.bounce.components.momentum} V${s.bounce.components.volume} T${s.bounce.components.structure} F${s.bounce.components.mtf}` : "—"}
                     </td>
                   </tr>
                 ))}
@@ -202,20 +168,18 @@ export default function BestBounce() {
       </Card>
 
       {error && (
-        <p className="mt-3 rounded-xl border border-amber-400/25 bg-amber-400/[0.06] px-4 py-2.5 text-xs text-amber-200">
-          {error}
-        </p>
+        <p className="mt-3 rounded-xl border border-amber-400/25 bg-amber-400/[0.06] px-4 py-2.5 text-xs text-amber-200">{error}</p>
       )}
 
       <Card className="mt-4">
-        <CardHeader title="How scoring works" subtitle="Transparent checklist — Signal Strength 0–100, never a probability" />
+        <CardHeader title="How bounce scoring works" subtitle="Checklist 0–100, never a probability" />
         <div className="grid gap-3 p-5 text-xs leading-relaxed text-slate-400 sm:grid-cols-2 lg:grid-cols-5">
           {[
-            ["Trend · 25", "EMA20/50/200 stack + price position on 15m and higher frames."],
-            ["Momentum · 20", "RSI recovery (never blind oversold) + MACD histogram improvement."],
-            ["Volume · 15", "Relative volume confirmation + spike detection."],
-            ["Structure · 20", "HH/HL/LH/LL swings, close-confirmed breakouts, retests."],
-            ["Multi-TF · 20", "4H major / 1H structure / 15M setup / 5M entry. Conflicts halve it."],
+            ["Support · 25", "Price within 1 ATR of a scored support zone."],
+            ["Momentum · 35", "RSI weakness-then-recovery plus MACD improvement."],
+            ["Volume · 15", "Relative-volume confirmation, spikes weigh more."],
+            ["Structure · 5", "HH/HL or LH/LL agreement with the bounce side."],
+            ["MTF · 25", "5M reversal turn plus a non-hostile 4H."],
           ].map(([t, d]) => (
             <div key={t} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
               <p className="font-bold text-slate-200">{t}</p>

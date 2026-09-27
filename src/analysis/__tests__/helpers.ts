@@ -88,6 +88,17 @@ export function selloff(n = 260, start = 800): number[] {
 }
 
 /**
+ * Parabolic blowoff: accelerating rally plus a final vertical spike.
+ * Price ends far above any support — the textbook chase the extension
+ * gate must refuse.
+ */
+export function parabolic(): number[] {
+  const base = rally(250);
+  const top = base[base.length - 1];
+  return [...base, top * 1.1, top * 1.19, top * 1.3, top * 1.3, top * 1.31];
+}
+
+/**
  * Mean-reverting chop ending mid-range on a descending zero-crossing —
  * price sits inside its converged EMA cluster (neutral by construction).
  */

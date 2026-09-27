@@ -4,13 +4,15 @@ import {
   Card,
   CardHeader,
   DemoBadge,
-  DirectionBadge,
-  EmptyState,
   PageHeader,
-  TableShell,
 } from "../components/ui";
 import { FreshnessLabel, LiveBadge } from "../components/LiveBadge";
+import { ConnectionBadge } from "../components/ConnectionBadge";
+import { timeAgo } from "../components/NewsList";
 import { useMarkets } from "../market/store";
+import { useScan } from "../scanner";
+import { isListableBounce } from "../analysis/signal";
+import { loadJournal } from "../signals/journal";
 import {
   formatChangePct,
   formatOiCoins,
@@ -18,10 +20,6 @@ import {
   formatVolumeNotional,
 } from "../lib/format";
 import { formatFundingRate } from "../market/hyperliquid/funding";
-import {
-  RECENT_SIGNAL_COLUMNS,
-  TOP_PLACEHOLDER_SIGNALS,
-} from "../data/placeholders";
 import { summarizeRegime } from "../ai/regime";
 import { cn } from "../lib/cn";
 import type { Market } from "../market/hyperliquid/types";
@@ -82,6 +80,123 @@ function AiMarketRegime({ markets }: { markets: Market[] }) {
   );
 }
 
+function ScanHighlights() {
+  const { summary, scanning, pausedStale } = useScan();
+  const { connection, lastSuccessAt, updatedAt } = useMarkets();
+  const results = summary?.results ?? [];
+  const longs = results.filter((r) => r.signal.direction === "LONG").slice(0, 5);
+  const shorts = results.filter((r) => r.signal.direction === "SHORT").slice(0, 5);
+  const bounces = results.filter((r) => isListableBounce(r.signal)).slice(0, 5);
+  const breakouts = results
+    .filter((r) => r.setupType === "BREAKOUT" || r.setupType === "BREAKDOWN")
+    .slice(0, 5);
+  const breadth = summary?.breadth;
+
+  return (
+    <div className="mt-5">
+      <div className="mb-3 flex items-end justify-between">
+        <h2 className="text-sm font-bold tracking-widest text-slate-300 uppercase">
+          High-Confluence Setups
+        </h2>
+        <Link to="/scanner" className="text-xs font-semibold text-cyan-300 hover:text-cyan-200">
+          Full scanner →
+        </Link>
+      </div>
+      {pausedStale ? (
+        <p className="rounded-xl border border-amber-400/25 bg-amber-400/[0.06] px-4 py-3 text-xs font-bold text-amber-200">
+          DATA STALE — highlights paused until the feed recovers.
+        </p>
+      ) : (
+        <>
+          {breadth && breadth.counted > 0 && (
+            <div className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-2.5 text-xs">
+              <span className="font-bold tracking-widest text-slate-500 uppercase">Market Breadth</span>
+              <span className="font-mono text-emerald-300">Bullish {breadth.bullishPct}%</span>
+              <span className="font-mono text-slate-400">Neutral {breadth.neutralPct}%</span>
+              <span className="font-mono text-rose-300">Bearish {breadth.bearishPct}%</span>
+              <span className="ml-auto text-slate-600">from {breadth.counted} scored markets</span>
+            </div>
+          )}
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <HighlightCard title="High-Confluence Longs" to="/scanner" rows={longs} empty={scanning ? "Scoring…" : "None right now"} />
+            <HighlightCard title="High-Confluence Shorts" to="/scanner" rows={shorts} empty={scanning ? "Scoring…" : "None right now"} />
+            <HighlightCard title="Bounce Setups" to="/bounce" rows={bounces} empty={scanning ? "Scoring…" : "None detected"} />
+            <HighlightCard title="Breakout Setups" to="/scanner" rows={breakouts} empty={scanning ? "Scoring…" : "None detected"} />
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-2.5 text-xs text-slate-400">
+            <span className="font-bold tracking-widest text-slate-500 uppercase">Market Data Status</span>
+            <ConnectionBadge showLabel={false} />
+            <span className="font-mono">{connection}</span>
+            <span>·</span>
+            <FreshnessLabel updatedAt={lastSuccessAt || updatedAt} />
+            <span>·</span>
+            <span>{summary ? `last scan ${timeAgo(summary.completedAt)}` : "no scan yet"}</span>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function HighlightCard({
+  title,
+  to,
+  rows,
+  empty,
+}: {
+  title: string;
+  to: string;
+  rows: { symbol: string; signal: { direction: string; signalStrength: number } }[];
+  empty: string;
+}) {
+  return (
+    <Card className="p-4">
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-[11px] font-bold tracking-widest text-slate-400 uppercase">{title}</p>
+        <Link to={to} className="text-[11px] font-semibold text-cyan-300 hover:underline">→</Link>
+      </div>
+      {rows.length === 0 ? (
+        <p className="py-3 text-center text-xs text-slate-600">{empty}</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {rows.map((r) => (
+            <li key={r.symbol}>
+              <Link to={`/coin/${r.symbol}`} className="flex items-center justify-between rounded-lg border border-slate-800/60 px-2.5 py-1.5 hover:border-slate-700">
+                <span className="text-xs font-bold text-white">{r.symbol}</span>
+                <span className={cn("font-mono text-xs", r.signal.direction === "LONG" ? "text-emerald-300" : "text-rose-300")}>
+                  {r.signal.signalStrength}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+function RecentSignalsList() {
+  const entries = loadJournal()
+    .sort((a, b) => b.lastSeen - a.lastSeen)
+    .slice(0, 8);
+  if (entries.length === 0) {
+    return <p className="px-5 py-8 text-center text-sm text-slate-500">No journaled signals yet — run a scan.</p>;
+  }
+  return (
+    <ul className="divide-y divide-slate-800/60">
+      {entries.map((e) => (
+        <li key={e.id} className="flex items-center gap-2 px-5 py-2 text-xs">
+          <Link to={`/coin/${e.symbol}`} className="font-bold text-white hover:text-cyan-300">{e.symbol}</Link>
+          <span className={cn("font-bold", e.direction === "LONG" ? "text-emerald-300" : "text-rose-300")}>{e.direction}</span>
+          <span className="font-mono text-slate-400">{e.strength}</span>
+          <span className="rounded bg-slate-800 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">{e.status}</span>
+          <span className="ml-auto text-slate-600">{timeAgo(e.lastSeen)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export default function Dashboard() {
   const { markets, status, error, updatedAt, refresh } = useMarkets();
   const bySymbol = new Map(markets.map((m) => [m.symbol, m]));
@@ -102,11 +217,11 @@ export default function Dashboard() {
     <div>
       <PageHeader
         title="Dashboard"
-        description="Live Hyperliquid perpetual market overview. Signals remain disabled until Phase 3+."
+        description="Live Hyperliquid overview with deterministic signal intelligence. Ranks are confluence, never advice."
         right={
           <div className="flex items-center gap-2">
             <FreshnessLabel updatedAt={updatedAt} />
-            <LiveBadge status={status} />
+            <ConnectionBadge />
           </div>
         }
       />
@@ -205,58 +320,8 @@ export default function Dashboard() {
       {/* AI MARKET REGIME — deterministic summary of supplied market data */}
       <AiMarketRegime markets={markets} />
 
-      {/* TOP SIGNALS — still Phase 3+, keep honest placeholder */}
-      <div className="mt-5 flex items-end justify-between">
-        <h2 className="text-sm font-bold tracking-widest text-slate-300 uppercase">
-          Top Signals
-        </h2>
-        <Link
-          to="/history"
-          className="inline-flex items-center gap-1 text-xs font-semibold text-cyan-300 hover:text-cyan-200"
-        >
-          View history →
-        </Link>
-      </div>
-      <div className="mt-3 grid gap-3 md:grid-cols-3">
-        {TOP_PLACEHOLDER_SIGNALS.map((s) => (
-          <Card key={s.coin} className="p-5 opacity-80">
-            <div className="flex items-center justify-between">
-              <p className="text-lg font-extrabold text-white">{s.coin}</p>
-              <DirectionBadge direction={s.direction} />
-            </div>
-            <div className="mt-4 space-y-2 text-[13px]">
-              {[
-                ["Entry", s.entry],
-                ["SL", s.sl],
-                ["TP1", s.tp1],
-                ["TP2", s.tp2],
-                ["Signal Strength", s.strength],
-              ].map(([k, v]) => (
-                <div
-                  key={k}
-                  className="flex items-center justify-between border-b border-dashed border-slate-800/80 pb-1.5 last:border-0 last:pb-0"
-                >
-                  <span className="text-slate-500">{k}</span>
-                  <span className="font-mono font-semibold text-slate-300">{v}</span>
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 flex items-center justify-between">
-              <DemoBadge label="PHASE 3+" />
-              <Link
-                to={`/coin/${s.coin}`}
-                className="text-xs font-semibold text-cyan-300 hover:underline"
-              >
-                Open live analysis →
-              </Link>
-            </div>
-          </Card>
-        ))}
-      </div>
-      <p className="mt-2 text-[11px] text-slate-600">
-        Signal generation is NOT implemented in Phase 2. Live prices above are real;
-        signal cards stay placeholders until Phase 3+.
-      </p>
+      {/* HIGH-CONFLUENCE SETUPS — live scan, rank is confluence not advice */}
+      <ScanHighlights />
 
       {/* Market snapshot + signals note */}
       <div className="mt-5 grid gap-4 lg:grid-cols-5">
@@ -292,19 +357,14 @@ export default function Dashboard() {
         <Card className="lg:col-span-3">
           <CardHeader
             title="Recent Signals"
-            subtitle="Signal engine arrives in Phase 3+"
-            right={<DemoBadge label="NOT LIVE" />}
+            subtitle="Latest journaled setups with lifecycle status"
+            right={
+              <Link to="/history" className="text-xs font-semibold text-cyan-300 hover:underline">
+                Full history →
+              </Link>
+            }
           />
-          <TableShell columns={RECENT_SIGNAL_COLUMNS}>
-            <tr>
-              <td
-                colSpan={RECENT_SIGNAL_COLUMNS.length}
-                className="px-4 py-8 text-center text-sm text-slate-500"
-              >
-                No signals yet — the Phase 2 build ships market data only.
-              </td>
-            </tr>
-          </TableShell>
+          <RecentSignalsList />
         </Card>
       </div>
 
@@ -313,13 +373,6 @@ export default function Dashboard() {
           {error} Showing last good snapshot.
         </p>
       )}
-
-      <Card className="mt-5 lg:hidden">
-        <EmptyState
-          title="Bounce scanner preview"
-          message="Best-bounce scoring lands after signals (Phase 4+). Market data above is live."
-        />
-      </Card>
     </div>
   );
 }
