@@ -28,9 +28,9 @@ import {
 import { cn } from "../lib/cn";
 import { classifySetupType } from "../signals/setupType";
 import { assessQuality } from "../signals/quality";
-import { loadJournal } from "../signals/journal";
+import { backfillAiSummary, loadJournal } from "../signals/journal";
 import { summarizeRegime } from "../ai/regime";
-import { backfillAiSummary } from "../signals/journal";
+import { subscribeAlerts, type SignalEvent } from "../alerts";
 import { getSharedPaperEngine } from "../paper";
 import { useScan } from "../scanner";
 import type { Signal } from "../analysis/signal";
@@ -128,6 +128,37 @@ function CoinOutcomes({ symbol }: { symbol: string }) {
               </span>
             )}
             <span className="ml-auto text-slate-600">{new Date(e.firstSeen).toLocaleDateString()}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** Signal timeline: only events that actually occurred for this coin. */
+function SignalTimeline({ symbol }: { symbol: string }) {
+  const [events, setEvents] = useState<SignalEvent[]>([]);
+  useEffect(() => subscribeAlerts(setEvents), []);
+  const rows = events
+    .filter((e) => e.symbol === symbol)
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .slice(0, 12);
+  if (rows.length === 0) return null;
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+      <p className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Signal Timeline · {symbol}</p>
+      <ul className="mt-2 space-y-1.5">
+        {rows.map((e) => (
+          <li key={e.id} className="flex items-center gap-2 text-xs">
+            <span className={cn("font-bold", e.direction === "LONG" ? "text-emerald-300" : "text-rose-300")}>
+              {e.direction}
+            </span>
+            <span className="rounded bg-slate-800 px-1.5 py-0.5 font-mono text-[10px] text-slate-300">
+              {e.type.replace(/_/g, " ")}
+            </span>
+            {e.detail && <span className="font-mono text-[11px] text-cyan-300">{e.detail}</span>}
+            <span className="font-mono text-slate-500">{e.currentStrength}</span>
+            <span className="ml-auto text-slate-600">{new Date(e.timestamp).toLocaleString()}</span>
           </li>
         ))}
       </ul>
@@ -560,6 +591,7 @@ export default function CoinAnalysis() {
               </div>
             </div>
             <CoinOutcomes symbol={coin} />
+            <SignalTimeline symbol={coin} />
           </div>
         )}
       </Card>

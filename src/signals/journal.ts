@@ -3,6 +3,9 @@ import type { SignalLifecycleState } from "./lifecycle";
 import type { SetupType } from "./setupType";
 import type { SignalQuality } from "./quality";
 
+/** Journal lifecycle adds EXPIRED (max lifetime or decayed structure). */
+export type JournalStatus = SignalLifecycleState | "EXPIRED";
+
 /**
  * Signal journal: localStorage-backed history of every recorded setup.
  * Upserts dedupe by stable signal ID; lifecycle states and outcomes are
@@ -26,7 +29,7 @@ export interface JournalEntry {
   riskReward: number | null;
   strength: number;
   quality: SignalQuality;
-  status: SignalLifecycleState;
+  status: JournalStatus;
   outcome: Outcome | null;
   /** Lazily backfilled when the coin AI explanation runs. */
   aiSummary: string | null;
@@ -103,7 +106,7 @@ export interface JournalUpsert {
   riskReward: number | null;
   strength: number;
   quality: SignalQuality;
-  status: SignalLifecycleState;
+  status: JournalStatus;
   outcome: Outcome | null;
   newsHeadlines: string[];
   dataTimestamp: number;

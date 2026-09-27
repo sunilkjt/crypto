@@ -1,8 +1,8 @@
-# CryptoIn AI Signal — Phase 6 (Backtesting + Paper Trading) ✅
+# CryptoIn AI Signal — Phase 7 (Real-Time Monitoring + Alerts) ✅
 
-Strategy laboratory on the deterministic engine. **Simulation only: no exchange
-accounts, no orders, no keys, no automation of real money — the words "paper"
-and "simulation" are on every related screen.**
+Monitoring and alerts on the deterministic engine. **No exchange orders, no
+private keys, no automatic real trading — alerting is in-app, browser, sound,
+or future server-side providers only.**
 
 Tech: React + TypeScript + Vite + Tailwind CSS v4 + Recharts + React Router + Lucide + Vitest.
 
@@ -129,7 +129,35 @@ only endpoint URLs (see `.env.example`); audit grep clean.
   performance incl. TP rates, two-step RESET, localStorage persistence with a
   replaceable storage interface. No keys/credentials requested or stored.
 
-- [x] Tests (mocked, 168 passing) + `npm run build` green
+- [x] Tests (mocked, 168 passing) + `npm run build` green (Phase 6 baseline)
+
+## Phase 7 completed — monitoring + alerts (no trading touch)
+
+- Monitor (`src/alerts/`): the shared scan IS the monitor — one cadence
+  (OFF/30s/1m/5m, default 1m) feeds Scanner/Bounce/Dashboard/History/Alerts.
+  No duplicate connections, no per-page feeds, no AI/news in the alert path.
+- Events: NEW_SIGNAL, STRENGTHENED/WEAKENED (±5 lifecycle moves), INVALIDATED,
+  TARGET_REACHED (TP1/2/3), ENTRY_REACHED, BOUNCE/BREAKOUT_DETECTED — each with
+  a stable `signalId::type[:level]` ID; repeats collapse, never re-alert.
+- Alert Center (`#/alerts`): NEW/ACTIVE/READ counts, full plan columns,
+  coin/direction/event/date filters, mark-as-read, persisted history (200 cap).
+- Providers: browser notifications (permission asked ONLY on enable, click
+  opens `#/coin/SYM`), WebAudio sound beep (off unless enabled), Telegram
+  architecture (message template per spec, `Not configured` without a backend
+  endpoint, token never in frontend). In-app bell with unread count included.
+- Filters: strength 60/70/80/90, LONG/SHORT/BOTH, setup set, TF set,
+  watchlist-only. Watchlist (`#/watchlist`): pinned coins flagged ★ and
+  prioritized; global scanner unaffected.
+- Signal detail = coin page + timeline (created/strengthened/entry/TPs/
+  weakened/invalidated — only occurred events) + AI + news + past outcomes.
+- Targets on live mid ticks (wicks may pass between ticks — candle ranges in
+  the journal stay the conservative record); expiry at 24h or sub-40 strength.
+- Offline: MARKET DATA OFFLINE banner, scans paused, zero stale alerts, fresh
+  scan on reconnect without replaying history (persisted seen-IDs).
+- AI/news failures: monitor never calls them; coin sections degrade to their
+  honest unavailable states while alerts continue.
+
+- [x] Tests (mocked, 185 passing) + `npm run build` green
 
 ## Hyperliquid data sources (public only)
 
@@ -209,6 +237,12 @@ src/backtest/         # types, data (chunked history + funding), simulation
 src/paper/            # types, portfolio (pure lifecycle math), engine
                       # (account, persistence, auto-sim), singleton
   __tests__/          # lifecycle, engine accounting, secret-free persistence
+src/alerts/           # events (stable IDs), settings (persisted filters),
+                      # watchlist, providers (browser/sound/telegram-arch),
+                      # store (persisted history, fan-out), monitor (pure
+                      # scan/target evaluation), targets (tick checks), expiry
+  __tests__/          # detection, dedupe, transitions, TP/entry/invalidation,
+                      # expiry, permission silence, filters, watchlist, offline
 ```
 
 Rules: UI never touches `fetch` or raw shapes — only `useMarkets()`, `useCandles()`, `getMarkets()`, `getCandles()`, formatters.
@@ -217,7 +251,7 @@ Rules: UI never touches `fetch` or raw shapes — only `useMarkets()`, `useCandl
 
 ```bash
 npm install
-npm test        # vitest run — 168 mocked unit tests
+npm test        # vitest run — 185 mocked unit tests
 npm run build   # tsc -b && vite build
 npm run dev     # http://localhost:5173
 ```
@@ -228,9 +262,11 @@ Verify: `#/scanner` (filters, 6 sorts, refresh modes, stale pause) → `#/bounce
 
 - `/` Dashboard — regime + breadth + high-confluence longs/shorts + bounce/breakout strips + recent signals + data status
 - `/scanner` — HIGH-CONFLUENCE SETUPS over the eligible universe: 13 columns, direction/setup/strength/volume filters, 6 sorts (default Strength ↓), refresh + universe + TF controls
-- `/coin/:symbol` — signal state chip, setup type, component bars, regime/breadth context, past outcomes, AI + news + history link
+- `/coin/:symbol` — signal state chip, setup type, component bars, regime/breadth context, past outcomes, timeline, AI + news + history link, TAKE PAPER TRADE
 - `/bounce` — full-universe bounce scan with bounce-score components + catalyst column
-- `/history` — journal with lifecycle filters, outcome touches, refresh-outcomes (bounded), clear
+- `/alerts` — NEW/ACTIVE/READ event history with plan columns and filters
+- `/watchlist` — pinned coins with live prices and latest setups
+- `/history` — journal with lifecycle filters (incl. EXPIRED), outcome touches, refresh-outcomes (bounded), clear
 - `/backtest` — config (symbol/TF/dates/balance/risk/fee/slippage/leverage/train-test/walk-forward, multi-symbol compare), metrics, equity/drawdown charts, sortable trade table, strength/setup breakdowns
 - `/paper` — PAPER/SIMULATION banners, account config, auto-toggle, open positions with live R, position chart overlays, history filters, performance, two-step reset
 - `/settings` — unchanged shell (out of scope)

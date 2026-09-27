@@ -14,7 +14,7 @@ import { getCandleWindow } from "../market/hyperliquid/timeframes";
 import type { Timeframe } from "../market/hyperliquid/types";
 import { cn } from "../lib/cn";
 
-type StatusFilter = "ALL" | "ACTIVE" | "NEW" | "INVALIDATED" | "COMPLETED" | "STRENGTHENING" | "WEAKENING";
+type StatusFilter = "ALL" | "ACTIVE" | "NEW" | "STRENGTHENING" | "WEAKENING" | "INVALIDATED" | "COMPLETED" | "EXPIRED";
 
 const ACTIVE_STATUSES = ["NEW", "ACTIVE", "STRENGTHENING", "WEAKENING"];
 
@@ -140,7 +140,7 @@ export default function History() {
           }
         />
         <div className="flex flex-wrap gap-1.5 border-b border-slate-800/70 px-4 py-3">
-          {(["ALL", "ACTIVE", "NEW", "STRENGTHENING", "WEAKENING", "INVALIDATED", "COMPLETED"] as StatusFilter[]).map((f) => (
+          {(["ALL", "ACTIVE", "NEW", "STRENGTHENING", "WEAKENING", "INVALIDATED", "COMPLETED", "EXPIRED"] as StatusFilter[]).map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}
@@ -183,7 +183,7 @@ export default function History() {
                 <td className="px-3 py-2 font-mono font-bold text-slate-100">{e.strength}</td>
                 <td className="px-3 py-2 text-[11px] whitespace-nowrap text-slate-400">{e.quality}</td>
                 <td className="px-3 py-2">
-                  <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wider", e.status === "INVALIDATED" && "bg-rose-400/10 text-rose-300", e.status === "COMPLETED" && "bg-emerald-400/10 text-emerald-300", ACTIVE_STATUSES.includes(e.status) && "bg-cyan-400/10 text-cyan-300")}>
+                  <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wider", e.status === "INVALIDATED" && "bg-rose-400/10 text-rose-300", e.status === "COMPLETED" && "bg-emerald-400/10 text-emerald-300", e.status === "EXPIRED" && "bg-slate-800 text-slate-500", ACTIVE_STATUSES.includes(e.status) && "bg-cyan-400/10 text-cyan-300")}>
                     {e.status}
                   </span>
                 </td>

@@ -11,6 +11,7 @@ import {
   Menu,
   Radar,
   Settings,
+  Star,
   X,
   Zap,
 } from "lucide-react";
@@ -19,17 +20,19 @@ import { APP_NAME } from "../../types";
 import { useMarkets } from "../../market/store";
 import { ConnectionBadge, ConnectionLine } from "../ConnectionBadge";
 import {
-  markAllNotificationsRead,
-  subscribeNotifications,
-  unreadCount,
-  type SignalNotification,
-} from "../../signals/notifications";
+  eventMessage,
+  markAllAlertsRead,
+  subscribeAlerts,
+  type SignalEvent,
+} from "../../alerts";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/scanner", label: "Market Scanner", icon: Radar, end: false },
   { to: "/coin/OP", label: "Coin Analysis", icon: CandlestickChart, end: false },
   { to: "/bounce", label: "Best Bounce", icon: ArrowUpFromDot, end: false },
+  { to: "/alerts", label: "Alerts", icon: Bell, end: false },
+  { to: "/watchlist", label: "Watchlist", icon: Star, end: false },
   { to: "/history", label: "Signal History", icon: History, end: false },
   { to: "/backtest", label: "Backtest", icon: FlaskConical, end: false },
   { to: "/paper", label: "Paper Trading", icon: Briefcase, end: false },
@@ -110,11 +113,11 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
 export default function AppLayout() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
-  const [notes, setNotes] = useState<SignalNotification[]>([]);
+  const [notes, setNotes] = useState<SignalEvent[]>([]);
   const { markets } = useMarkets();
 
-  useEffect(() => subscribeNotifications(setNotes), []);
-  const unread = unreadCount(notes);
+  useEffect(() => subscribeAlerts(setNotes), []);
+  const unread = notes.filter((n) => !n.read).length;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 lg:flex">
@@ -199,7 +202,7 @@ export default function AppLayout() {
                   aria-label="Signal notifications"
                   onClick={() => {
                     setNotesOpen((o) => !o);
-                    if (!notesOpen) markAllNotificationsRead();
+                    if (!notesOpen) markAllAlertsRead();
                   }}
                   className="relative rounded-lg border border-slate-800 p-2 text-slate-300 hover:bg-slate-900"
                 >
@@ -217,14 +220,14 @@ export default function AppLayout() {
                     </p>
                     {notes.length === 0 ? (
                       <p className="px-2 py-4 text-center text-xs text-slate-500">
-                        No high-confluence events yet. The scanner emits here on NEW setups and material changes — never per refresh.
+                        No alert events yet. The monitor emits here on NEW setups and material changes — never per refresh.
                       </p>
                     ) : (
                       notes.slice(0, 20).map((n) => (
                         <div key={n.id} className="rounded-lg px-2 py-1.5 hover:bg-slate-800/60">
-                          <p className="text-xs text-slate-200">{n.message}</p>
+                          <p className="text-xs text-slate-200">{eventMessage(n)}</p>
                           <p className="text-[10px] text-slate-500">
-                            {n.kind === "NEW_SETUP" ? "New setup" : "State change"} · {new Date(n.at).toLocaleTimeString()}
+                            {n.type.replace(/_/g, " ")} · {n.status} · {new Date(n.timestamp).toLocaleTimeString()}
                           </p>
                         </div>
                       ))

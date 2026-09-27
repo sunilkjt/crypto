@@ -4,6 +4,8 @@ import Dashboard from "./pages/Dashboard";
 import Scanner from "./pages/Scanner";
 import CoinAnalysis from "./pages/CoinAnalysis";
 import BestBounce from "./pages/BestBounce";
+import Alerts from "./pages/Alerts";
+import Watchlist from "./pages/Watchlist";
 import History from "./pages/History";
 import Backtest from "./pages/Backtest";
 import PaperTrading from "./pages/PaperTrading";
@@ -33,6 +35,8 @@ export default function App() {
         <Route path="coin" element={<Navigate to="/coin/OP" replace />} />
         <Route path="coin/:symbol" element={<CoinAnalysis />} />
         <Route path="bounce" element={<BestBounce />} />
+        <Route path="alerts" element={<Alerts />} />
+        <Route path="watchlist" element={<Watchlist />} />
         <Route path="history" element={<History />} />
         <Route path="backtest" element={<Backtest />} />
         <Route path="paper" element={<PaperTrading />} />

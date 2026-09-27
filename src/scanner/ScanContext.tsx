@@ -13,20 +13,34 @@ import { useMarkets } from "../market/store";
 import { runFullScan, type ScanSummary } from "./engine";
 import { DEFAULT_ELIGIBILITY } from "./eligibility";
 import {
-  emitNotification,
-  isNoteworthyTransition,
   loadJournal,
   nextLifecycleState,
   upsertJournalSignal,
   type SignalLifecycleState,
 } from "../signals";
+import {
+  ingestAlertEvents,
+  loadAlertSettings,
+  setAlertProviders,
+  type SignalEvent,
+} from "../alerts";
+import { evaluateScan, evaluateTargets, type MonitorSnapshot } from "../alerts/monitor";
+import {
+  BrowserNotificationProvider,
+  SoundAlertProvider,
+  TelegramNotificationProvider,
+  telegramEndpointFromEnv,
+} from "../alerts/providers";
+import { isExpired, DEFAULT_MAX_SIGNAL_AGE_MS } from "../alerts/expiry";
+import { loadWatchlist } from "../alerts/watchlist";
 
 /**
  * Shared scan context: ONE full-market scan feeds Scanner, Bounce,
  * Dashboard and History. Refresh OFF/30s/1m/5m, manual rescan, bounded
- * concurrency, per-coin isolation. Journal + lifecycle + notifications
+ * concurrency, per-coin isolation. Journal + lifecycle + alert events
  * update here; outcomes refresh on the History page (bounded).
  * Stale market data pauses new scans — never mint signals from stale data.
+ * AI and news are never consulted by the monitor (engine-only alerts).
  */
 
 export const REFRESH_OPTIONS = [
@@ -54,8 +68,6 @@ interface ScanContextValue {
 
 const ScanContext = createContext<ScanContextValue | null>(null);
 
-const NOTIFY_MIN_STRENGTH = 75; // STRONG SETUP and above
-
 export function ScanProvider({ children }: { children: ReactNode }) {
   const { markets, stale } = useMarkets();
   const [summary, setSummary] = useState<ScanSummary | null>(null);
@@ -67,9 +79,32 @@ export function ScanProvider({ children }: { children: ReactNode }) {
   const [runId, setRunId] = useState(0);
   const [pausedStale, setPausedStale] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
-  const prevIdsRef = useRef<Map<string, { status: string; strength: number }>>(new Map());
+  const prevIdsRef = useRef<Map<string, MonitorSnapshot>>(new Map());
+  const soundRef = useRef<SoundAlertProvider | null>(null);
   const marketsRef = useRef(markets);
   marketsRef.current = markets;
+
+  // Seed seen-IDs from persisted alert history so a reload never
+  // replays hundreds of old alerts as NEW.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("cryptoin:alert-events:v1");
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { id?: unknown; currentStrength?: unknown }[];
+      if (!Array.isArray(parsed)) return;
+      const seeded = new Map<string, MonitorSnapshot>();
+      for (const e of parsed) {
+        if (typeof e?.id !== "string") continue;
+        const signalId = e.id.split("::")[0];
+        if (signalId && !seeded.has(signalId) && typeof e.currentStrength === "number") {
+          seeded.set(signalId, { strength: e.currentStrength, status: "ACTIVE" });
+        }
+      }
+      prevIdsRef.current = seeded;
+    } catch {
+      // storage unavailable — first scan may notify, dedupe still holds after
+    }
+  }, []);
 
   const runScan = useCallback(async () => {
     const snapshot = marketsRef.current;
@@ -90,13 +125,33 @@ export function ScanProvider({ children }: { children: ReactNode }) {
       if (ctrl.signal.aborted) return;
       setSummary(result);
 
-      // Lifecycle + journal + notifications (prices from the same snapshot).
-      const prices = new Map(snapshot.map((m) => [m.symbol, m.markPrice]));
-      const seen = new Map<string, { status: string; strength: number }>();
+      // Alert providers follow user settings (browser/sound on explicit
+      // enable only; telegram only with a configured backend endpoint).
+      const alertSettings = loadAlertSettings();
+      if (!soundRef.current) soundRef.current = new SoundAlertProvider();
+      soundRef.current.setEnabled(alertSettings.soundAlerts);
+      setAlertProviders([
+        new BrowserNotificationProvider(),
+        soundRef.current,
+        new TelegramNotificationProvider(telegramEndpointFromEnv()),
+      ]);
+      const watchlist = loadWatchlist();
+      const marks = new Map(snapshot.map((m) => [m.symbol, m.markPrice]));
+      const monitorCtx = {
+        marks,
+        watchlist,
+        settings: alertSettings,
+        now: Date.now(),
+      };
+
+      // Lifecycle + journal (prices from the same snapshot).
+      const prices = marks;
+      const seen = new Map<string, MonitorSnapshot>();
+      const lifecycleById = new Map<string, string>();
+      const journalEntries = loadJournal();
       for (const r of result.results) {
         if (!r.id || r.signal.direction === "WAIT") continue;
-        const prevEntries = loadJournal();
-        const prev = prevEntries.find((e) => e.id === r.id);
+        const prev = journalEntries.find((e) => e.id === r.id);
         const price = prices.get(r.symbol) ?? null;
         const prevState =
           (prev?.status ?? prevIdsRef.current.get(r.id)?.status ?? null) as SignalLifecycleState | null;
@@ -110,6 +165,10 @@ export function ScanProvider({ children }: { children: ReactNode }) {
           tp3: r.signal.tp3,
           direction: r.signal.direction,
         });
+        // Expiry: outlived structure or lifetime — journal it, never alert it.
+        const firstSeen = prev?.firstSeen ?? Date.now();
+        const expired = isExpired({ firstSeen, strength: r.signal.signalStrength, now: Date.now(), maxAgeMs: DEFAULT_MAX_SIGNAL_AGE_MS });
+        const finalStatus = expired ? "EXPIRED" : status;
         upsertJournalSignal({
           id: r.id,
           symbol: r.symbol,
@@ -125,31 +184,20 @@ export function ScanProvider({ children }: { children: ReactNode }) {
           riskReward: r.signal.riskReward,
           strength: r.signal.signalStrength,
           quality: r.quality,
-          status,
+          status: finalStatus,
           outcome: prev?.outcome ?? null,
           newsHeadlines: [],
           dataTimestamp: r.signal.dataTimestamp,
         });
-        const before = prevIdsRef.current.get(r.id);
-        if (!before && r.signal.signalStrength >= NOTIFY_MIN_STRENGTH) {
-          emitNotification({
-            kind: "NEW_SETUP",
-            symbol: r.symbol,
-            direction: r.signal.direction,
-            strength: r.signal.signalStrength,
-            message: `${r.symbol} ${r.signal.direction} NEW — strength ${r.signal.signalStrength} (${r.setupType}).`,
-          });
-        } else if (before && isNoteworthyTransition(before.status as SignalLifecycleState, status)) {
-          emitNotification({
-            kind: "STATE_CHANGE",
-            symbol: r.symbol,
-            direction: r.signal.direction,
-            strength: r.signal.signalStrength,
-            message: `${r.symbol} ${r.signal.direction}: ${before.status} → ${status} (${r.signal.signalStrength}).`,
-          });
-        }
-        seen.set(r.id, { status, strength: r.signal.signalStrength });
+        lifecycleById.set(r.id, finalStatus);
+        seen.set(r.id, { status: finalStatus, strength: r.signal.signalStrength });
       }
+
+      // Engine-only alert events: scan diff + live-mark target touches.
+      const scanEvents = evaluateScan(prevIdsRef.current, result.results, lifecycleById, monitorCtx);
+      const targetEvents = evaluateTargets(result.results, marks, monitorCtx);
+      const fresh: SignalEvent[] = ingestAlertEvents([...scanEvents, ...targetEvents]);
+      void fresh;
       prevIdsRef.current = seen;
     } catch {
       // runFullScan isolates per-coin errors; a throw here is fatal only.

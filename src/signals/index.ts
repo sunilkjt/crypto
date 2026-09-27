@@ -29,6 +29,7 @@ export {
   clearJournal,
   __setJournalStorageForTests,
   type JournalEntry,
+  type JournalStatus,
   type JournalUpsert,
 } from "./journal";
 export {
