@@ -1,8 +1,8 @@
-# CryptoIn AI Signal — Phase 3 (Deterministic Technical Analysis + Signal Scoring) ✅
+# CryptoIn AI Signal — Phase 4 (AI Market Analyst + News Intelligence) ✅
 
-Standalone crypto signal web app. **Deterministic math engine on live public
-Hyperliquid data. No LLM/AI analyst, no real trading, no automated orders,
-no paper trading, no backtesting in this phase.**
+Deterministic technical engine + explanatory AI layer. **The engine remains the
+source of truth: the AI explains supplied numbers, never calculates or overrides
+them. No real trading, no automated orders, no paper trading in this phase.**
 
 Tech: React + TypeScript + Vite + Tailwind CSS v4 + Recharts + React Router + Lucide + Vitest.
 
@@ -47,7 +47,33 @@ guard) and lists only agreeing bounce setups ≥ SETUP, else
 "No high-confluence bounce setups currently detected." `INSUFFICIENT DATA`
 below 210 setup candles; `DATA STALE` never mints fresh signals.
 
-- [x] Tests (mocked, 101 passing) + `npm run build` green
+- [x] Tests (mocked, 101 passing) + `npm run build` green (Phase 3 baseline)
+
+## Phase 4 completed — AI analyst + news (engine still decides)
+
+AI module (`src/ai/`): `AIProvider` abstraction (`LocalExplainerProvider`
+default, clearly badged LOCAL · NOT AN LLM; `HttpAiProvider` active only when
+`VITE_AI_ENDPOINT` points at your own key-holding backend). Strict system
+prompt (11 duties, WAIT stays WAIT, strength is never probability). Structured
+input (engine numbers + market snapshot + verified news, copied never computed)
+and 9-block JSON output validated centrally — direction conflicts and invented
+numeric fields are rejected, HTML escaped, rendering is text-only.
+Cache key `symbol+timeframe+signalTs+dataTs` (15-min TTL); throttle 10s/key,
+max 2 concurrent, in-flight dedupe, timeouts; failures resolve to
+"AI analysis temporarily unavailable." while technicals keep working.
+
+News module (`src/news/`): provider abstraction (empty default → honest
+"No significant verified recent catalyst found."; HTTP backend optional),
+https-only URLs required, relevance maps (OP→Optimism/Superchain…),
+sentiment POSITIVE/NEGATIVE/NEUTRAL/UNCERTAIN (informational, never rescored),
+dedupe + newest-first. Coin page shows headline/source/age/summary/sentiment
+with safe external links; bounce rows show Catalyst: None/positive/negative.
+Dashboard gains a deterministic AI MARKET REGIME (BTC/ETH/breadth/chop).
+
+Security: no keys/tokens/secrets in code, `VITE_*`, `public/`, or history —
+only endpoint URLs (see `.env.example`); audit grep clean.
+
+- [x] Tests (mocked, 126 passing) + `npm run build` green
 
 ## Hyperliquid data sources (public only)
 
@@ -102,9 +128,17 @@ src/indicators/       # local OHLCV math: ema, rsi, macd, atr, volume (+ index)
   __tests__/          # hand-checked known values (EMA seed, Wilder RSI, TR, relVol)
 src/analysis/         # deterministic engine: trend, momentum, volumeProfile,
                       # swings, levels, structure (+efficiencyRatio), mtf,
-                      # bounce, scoring, tradeplan, signal, hooks
+                      # bounce, scoring, tradeplan, signal, describe, hooks
   __tests__/          # scenario generators (bull/bear/chop/V-recovery/
                       # false-breakout/wick-rejection/dead-floor/insufficient)
+src/ai/                # analyst: types, prompts, validate, input, cache,
+                      # ratelimit, analyst (orchestrator), regime,
+                      # providers/{localExplainer,httpProvider}, useAiAnalysis
+  __tests__/          # input gen, response validation, override rejection,
+                      # cache, throttle/dedupe, fallback, regime
+src/news/             # types, relevance maps, provider (empty/http),
+                      # aggregator, useNews/useNewsBatch
+  __tests__/          # normalization, relevance, sentiment, ordering
 ```
 
 Rules: UI never touches `fetch` or raw shapes — only `useMarkets()`, `useCandles()`, `getMarkets()`, `getCandles()`, formatters.
@@ -113,18 +147,18 @@ Rules: UI never touches `fetch` or raw shapes — only `useMarkets()`, `useCandl
 
 ```bash
 npm install
-npm test        # vitest run — 101 mocked unit tests
+npm test        # vitest run — 126 mocked unit tests
 npm run build   # tsc -b && vite build
 npm run dev     # http://localhost:5173
 ```
 
-Verify: Dashboard (BTC/ETH live) → Scanner (search `OP`; sort Strength/RSI page-scoped, Volume universe-wide) → `/coin/OP` (real EMA/RSI/MACD/ATR, trend/structure, LONG/SHORT/WAIT + plan) → `#/bounce` (top-25 scan, progress, honest empty state) → kill network for error state → wait 60s+ for DATA STALE (no fresh signals).
+Verify: Dashboard (regime card) → Scanner → `/coin/OP` (AI blocks populated LOCAL, news empty-state honest) → `#/bounce` (Catalyst column) → kill network (technicals live, AI unavailable) → stale data (no fresh AI calls).
 
 ## Pages
 
-- `/` Dashboard — live BTC/ETH/majors + snapshot; signal cards stay `PHASE 4+` placeholders (no signal engine there by design)
+- `/` Dashboard — live BTC/ETH/majors + snapshot + deterministic AI MARKET REGIME; signal cards stay `PHASE 5+` placeholders
 - `/scanner` — live table + deterministic 15m signals per row: Coin/Price/24h%/Trend/RSI/Volume/Structure/MTF/Signal/Strength
-- `/coin/:symbol` — live KPIs + candles + real EMA/RSI/MACD/ATR + trend/structure/levels + LONG/SHORT/WAIT signal with entry/invalidation/TPs/R:R; AI block marked Phase 4+
+- `/coin/:symbol` — live KPIs + candles + real EMA/RSI/MACD/ATR + trend/structure/levels + LONG/SHORT/WAIT signal with entry/invalidation/TPs/R:R + AI MARKET ANALYSIS (9 blocks, timestamps) + RECENT VERIFIED NEWS + history link
 - `/bounce` — top-25 volume scan with full MTF scoring; honest empty state when nothing qualifies
 - `/history`, `/backtest`, `/paper`, `/settings` — unchanged shells (out of scope)
 

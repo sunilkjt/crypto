@@ -6,6 +6,7 @@ import { FreshnessLabel } from "../components/LiveBadge";
 import { useMarkets } from "../market/store";
 import { isListableBounce, type Signal } from "../analysis/signal";
 import { useSignalBatch } from "../analysis/hooks";
+import { useNewsBatch } from "../news/useNews";
 import { formatPriceUsd } from "../lib/format";
 import { cn } from "../lib/cn";
 
@@ -42,6 +43,9 @@ export default function BestBounce() {
   }, [entries, markets]);
 
   const failed = entries.filter((e) => e.error !== null).length;
+
+  // Catalyst per listed setup (instantly empty without a news backend).
+  const catalystBySymbol = useNewsBatch(useMemo(() => setups.map((s) => s.signal.symbol), [setups]));
 
   return (
     <div>
@@ -120,10 +124,10 @@ export default function BestBounce() {
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-left text-sm" style={{ minWidth: 1020 }}>
+            <table className="w-full border-collapse text-left text-sm" style={{ minWidth: 1140 }}>
               <thead>
                 <tr className="border-b border-slate-800 text-[11px] tracking-widest text-slate-500 uppercase">
-                  {["Coin", "Price", "Score", "Dir", "Entry", "Invalidation", "TP1", "TP2", "TP3", "R:R", "Top reasons"].map((c) => (
+                  {["Coin", "Price", "Score", "Dir", "Entry", "Invalidation", "TP1", "TP2", "TP3", "R:R", "Catalyst", "Top reasons"].map((c) => (
                     <th key={c} className="px-3 py-3 font-semibold whitespace-nowrap">{c}</th>
                   ))}
                 </tr>
@@ -161,6 +165,30 @@ export default function BestBounce() {
                     <td className="px-3 py-2.5 font-mono text-xs text-slate-300">{fmt(s.tp3)}</td>
                     <td className="px-3 py-2.5 font-mono text-xs text-slate-200">
                       {s.riskReward !== null ? `1:${s.riskReward}` : "—"}
+                    </td>
+                    <td className="max-w-[220px] px-3 py-2.5 text-[11px] leading-snug">
+                      {(() => {
+                        const item = catalystBySymbol.get(s.symbol);
+                        if (!item) return <span className="text-slate-600">Catalyst: None found</span>;
+                        const positive = item.sentiment === "POSITIVE";
+                        const negative = item.sentiment === "NEGATIVE";
+                        return (
+                          <a
+                            href={item.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={`${item.headline} (${item.source})`}
+                            className={cn(
+                              "font-semibold hover:underline",
+                              positive && "text-emerald-300",
+                              negative && "text-rose-300",
+                              !positive && !negative && "text-slate-300",
+                            )}
+                          >
+                            Recent {positive ? "positive" : negative ? "negative" : "neutral"} catalyst
+                          </a>
+                        );
+                      })()}
                     </td>
                     <td className="max-w-[280px] px-3 py-2.5 text-[11px] leading-snug text-slate-400">
                       {s.reasons.slice(0, 3).join(" · ") || "—"}

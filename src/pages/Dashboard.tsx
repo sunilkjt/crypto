@@ -22,7 +22,9 @@ import {
   RECENT_SIGNAL_COLUMNS,
   TOP_PLACEHOLDER_SIGNALS,
 } from "../data/placeholders";
+import { summarizeRegime } from "../ai/regime";
 import { cn } from "../lib/cn";
+import type { Market } from "../market/hyperliquid/types";
 
 const MAJORS = ["BTC", "ETH", "SOL", "HYPE", "DOGE", "LINK", "AVAX", "ARB"];
 
@@ -52,6 +54,31 @@ function RegimeCard({
       </p>
       <p className="mt-0.5 text-xs text-slate-500">{sub}</p>
     </div>
+  );
+}
+
+function AiMarketRegime({ markets }: { markets: Market[] }) {
+  const regime = summarizeRegime(markets);
+  const tone =
+    regime.regime === "BULLISH" ? "text-emerald-300" : regime.regime === "BEARISH" ? "text-rose-300" : "text-amber-300";
+  return (
+    <Card className="mt-4">
+      <CardHeader
+        title="AI Market Regime"
+        subtitle="BTC trend · ETH trend · breadth · chop — supplied data only"
+        right={<DemoBadge label="LOCAL" />}
+      />
+      <div className="px-5 py-4">
+        <p className={`text-lg font-extrabold tracking-tight ${tone}`}>
+          {regime.regime === "BULLISH" ? "🟢" : regime.regime === "BEARISH" ? "🔴" : "🟡"} {regime.regime}
+        </p>
+        <p className="mt-1 max-w-3xl text-[13px] leading-relaxed text-slate-300">{regime.explanation}</p>
+        <p className="mt-2 font-mono text-[11px] text-slate-500">
+          breadth {regime.breadthUpPct ?? "—"}% up · median |24h| {regime.medianAbsChangePct ?? "—"}% ·{" "}
+          {regime.marketsCounted} markets · deterministic, no LLM
+        </p>
+      </div>
+    </Card>
   );
 }
 
@@ -174,6 +201,9 @@ export default function Dashboard() {
           </span>
         </div>
       </Card>
+
+      {/* AI MARKET REGIME — deterministic summary of supplied market data */}
+      <AiMarketRegime markets={markets} />
 
       {/* TOP SIGNALS — still Phase 3+, keep honest placeholder */}
       <div className="mt-5 flex items-end justify-between">

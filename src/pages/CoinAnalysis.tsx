@@ -1,6 +1,11 @@
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Card, CardHeader, DemoBadge, DirectionBadge, PageHeader, Stat } from "../components/ui";
+import { AiAnalysisCard } from "../components/AiAnalysisCard";
+import { NewsList } from "../components/NewsList";
+import { buildAiInput } from "../ai/input";
+import { useAiAnalysis } from "../ai/useAiAnalysis";
+import { useNews } from "../news/useNews";
 import { CandleChart } from "../components/CandleChart";
 import { FreshnessLabel, LiveBadge } from "../components/LiveBadge";
 import { ConnectionBadge } from "../components/ConnectionBadge";
@@ -77,11 +82,23 @@ export default function CoinAnalysis() {
   const insufficient =
     !candlesLoading && (chartCandles.length > 0 && chartCandles.length < 210);
 
+  // AI input: engine numbers + market snapshot + verified news, copied only.
+  const { items: newsItems, loading: newsLoading } = useNews(coin);
+  const aiInput = useMemo(() => {
+    if (!signal || mktStale) return null;
+    try {
+      return buildAiInput({ symbol: coin, market, candlesByTf: mtf, signal, news: newsItems });
+    } catch {
+      return null;
+    }
+  }, [signal, mktStale, coin, market, mtf, newsItems]);
+  const ai = useAiAnalysis(aiInput, "15m", aiInput !== null);
+
   return (
     <div>
       <PageHeader
         title={`Coin Analysis · ${coin}`}
-        description="Deterministic technical analysis on live Hyperliquid candles. No AI/LLM in this phase."
+        description="Deterministic technical analysis on live Hyperliquid candles, explained block by block. The engine decides; the AI only explains."
         right={
           <div className="flex items-center gap-2">
             <FreshnessLabel updatedAt={mktUpdated} />
@@ -344,11 +361,33 @@ export default function CoinAnalysis() {
         )}
       </Card>
 
+      <div className="mt-4">
+        <AiAnalysisCard
+          state={mktStale ? "unavailable" : ai.state === "idle" && aiInput === null && !signal ? "idle" : ai.state}
+          analysis={mktStale ? null : ai.analysis}
+          provider={ai.provider}
+          cached={ai.cached}
+          marketDataTimestamp={mktUpdated}
+        />
+      </div>
+
+      <div className="mt-4">
+        <NewsList items={newsItems} loading={newsLoading} />
+      </div>
+
       <Card className="mt-4">
-        <CardHeader title="AI Analysis" subtitle="Phase 4+ — no LLM in this build" right={<DemoBadge label="PHASE 4+" />} />
+        <CardHeader
+          title="Signal History"
+          subtitle="Every closed signal for this coin lives on the history page"
+          right={
+            <Link to="/history" className="text-xs font-semibold text-cyan-300 hover:underline">
+              Open history →
+            </Link>
+          }
+        />
         <div className="px-5 py-4 text-xs leading-relaxed text-slate-500">
-          Deterministic analysis above is the complete Phase 3 output. An LLM analyst may interpret
-          these transparent scores in a later phase — it will never replace them.
+          Signal logging and backtesting arrive in later phases. The deterministic signal above
+          is computed fresh from live candles on every visit — nothing is stored yet.
         </div>
       </Card>
     </div>
