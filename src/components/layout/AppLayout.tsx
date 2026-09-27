@@ -19,6 +19,7 @@ import { cn } from "../../lib/cn";
 import { APP_NAME } from "../../types";
 import { useMarkets } from "../../market/store";
 import { ConnectionBadge, ConnectionLine } from "../ConnectionBadge";
+import { DiagnosticsPanel, isDevDiagnosticsEnabled } from "../DiagnosticsPanel";
 import {
   alertCoinNavigation,
   eventMessage,
@@ -267,6 +268,11 @@ export default function AppLayout() {
             CryptoIn AI Signal · Phase 2 live Hyperliquid data · Educational demo. Not financial
             advice. No real-money trading.
           </footer>
+          {isDevDiagnosticsEnabled() && (
+            <div className="mt-3">
+              <DiagnosticsPanel />
+            </div>
+          )}
         </main>
 
         {/* Mobile bottom nav */}

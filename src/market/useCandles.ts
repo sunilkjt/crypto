@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getCandleWindow } from "./hyperliquid/timeframes";
 import { getCachedCandles } from "./hyperliquid";
 import { wsManager } from "./ws";
+import { onVisible, pollAllowed } from "./visibility";
 import { isStale, FRESHNESS } from "./freshness";
 import type { Candle, Timeframe } from "./hyperliquid/types";
 import { HyperliquidError } from "./hyperliquid/types";
@@ -32,9 +33,22 @@ export function useCandles(symbol: string, timeframe: Timeframe, limit = 300): C
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState(0);
 
-  const key = `${coin}:${timeframe}:${limit}`;
-  const keyRef = useRef(key);
-  keyRef.current = key;
+  const refreshWindow = useCallback(async () => {
+    try {
+      const w = getCandleWindow(timeframe, Date.now(), limit);
+      const { candles: fresh, updatedAt: ts } = await getCachedCandles(
+        coin,
+        timeframe,
+        w.startTime,
+        w.endTime,
+      );
+      setCandles(fresh);
+      setUpdatedAt(ts);
+      setStatus((s) => (s === "error" && fresh.length === 0 ? s : "live"));
+    } catch {
+      // Keep existing candles; error banner only when empty.
+    }
+  }, [coin, timeframe, limit]);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,22 +93,9 @@ export function useCandles(symbol: string, timeframe: Timeframe, limit = 300): C
     });
 
     // Polling fallback every 30s keeps the chart alive without WS.
-    const poll = window.setInterval(async () => {
-      try {
-        const w = getCandleWindow(timeframe, Date.now(), limit);
-        const { candles: fresh, updatedAt: ts } = await getCachedCandles(
-          coin,
-          timeframe,
-          w.startTime,
-          w.endTime,
-        );
-        if (cancelled) return;
-        setCandles(fresh);
-        setUpdatedAt(ts);
-        setStatus((s) => (s === "error" && fresh.length === 0 ? s : "live"));
-      } catch {
-        // Keep existing candles; error banner only when empty.
-      }
+    // Hidden tabs skip it (WS ticks still merge); cleanup on unmount.
+    const poll = window.setInterval(() => {
+      if (pollAllowed()) void refreshWindow();
     }, 30_000);
 
     return () => {
@@ -102,7 +103,12 @@ export function useCandles(symbol: string, timeframe: Timeframe, limit = 300): C
       unsub();
       window.clearInterval(poll);
     };
-  }, [coin, timeframe, limit]);
+  }, [coin, timeframe, limit, refreshWindow]);
+
+  // Returning to the tab refreshes the visible chart's window.
+  useEffect(() => {
+    return onVisible(() => void refreshWindow());
+  }, [refreshWindow]);
 
   const stale = updatedAt === 0 ? false : isStale(updatedAt, FRESHNESS.candlesStaleAfterMs);
   return {

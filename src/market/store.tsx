@@ -11,8 +11,15 @@ import {
 import { getMarkets } from "./hyperliquid";
 import { startMarketRealtime } from "./hyperliquid/realtime";
 import { mergeLivePrices } from "./hyperliquid/markets";
+import { wsManager } from "./ws";
 import { isMarketsStale } from "./freshness";
-import { deriveConnection, type ConnectionState } from "./connection";
+import {
+  applyRateLimitOverride,
+  deriveConnection,
+  type ConnectionState,
+  type RateLimitView,
+} from "./connection";
+import { onVisible, pollAllowed } from "./visibility";
 import { loadMarketsSnapshot, saveMarketsSnapshot } from "./persist";
 import type { Market, MarketStatus } from "./hyperliquid/types";
 import { HyperliquidError } from "./hyperliquid/types";
@@ -25,6 +32,12 @@ interface MarketDataValue {
   status: MarketStatus;
   /** Real connection state: earned by received data, never by page load. */
   connection: ConnectionState;
+  /** Countdown view while rate limited (zeros otherwise). */
+  rateLimit: RateLimitView;
+  /** Epoch ms of the last observed 429 (0 = none). */
+  rateLimitedAt: number;
+  /** Shared-socket state for RECONNECTING display. */
+  wsState: "open" | "connecting" | "idle";
   error: string | null;
   updatedAt: number;
   lastSuccessAt: number;
@@ -70,6 +83,8 @@ export function MarketDataProvider({ children }: { children: ReactNode }) {
   const [updatedAt, setUpdatedAt] = useState(boot.updatedAt);
   const [lastSuccessAt, setLastSuccessAt] = useState(0);
   const [consecutiveFailures, setConsecutiveFailures] = useState(0);
+  const [rateLimitedAt, setRateLimitedAt] = useState(0);
+  const [wsState, setWsState] = useState<"open" | "connecting" | "idle">("idle");
   const [tick, setTick] = useState(0);
   const startedAtRef = useRef(Date.now());
   const abortRef = useRef<AbortController | null>(null);
@@ -84,6 +99,9 @@ export function MarketDataProvider({ children }: { children: ReactNode }) {
 
   const recordFailure = useCallback((err: unknown) => {
     if (isCancellation(err)) return;
+    if (err instanceof HyperliquidError && err.kind === "rate-limited") {
+      setRateLimitedAt(Date.now());
+    }
     setConsecutiveFailures((f) => f + 1);
     setError(toMessage(err));
   }, []);
@@ -94,6 +112,8 @@ export function MarketDataProvider({ children }: { children: ReactNode }) {
     abortRef.current = ctrl;
     if (!isRefresh && marketsRef.current.length === 0) setStatus("loading");
     try {
+      // Interval polls ride the 45s snapshot cache; only explicit refreshes
+      // bypass it. Previously every 30s poll refetched ~11 dex payloads.
       const { markets: fresh, updatedAt: ts } = await getMarkets({
         signal: ctrl.signal,
         bypassCache: isRefresh,
@@ -119,11 +139,16 @@ export function MarketDataProvider({ children }: { children: ReactNode }) {
   }, [load]);
 
   // Initial load + slow poll for full snapshot (funding/OI/volume).
+  // Hidden tabs skip polling; returning to the tab refreshes immediately.
   useEffect(() => {
     void load(false);
-    const id = window.setInterval(() => void load(true), POLL_MS);
+    const id = window.setInterval(() => {
+      if (pollAllowed()) void load(false);
+    }, POLL_MS);
+    const offVisible = onVisible(() => void load(false));
     return () => {
       window.clearInterval(id);
+      offVisible();
       abortRef.current?.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -137,6 +162,7 @@ export function MarketDataProvider({ children }: { children: ReactNode }) {
           setMarkets((prev) => (prev.length === 0 ? prev : mergeLivePrices(prev, mids)));
           setUpdatedAt(at);
           setStatus((s) => (s === "error" ? s : "live"));
+          setWsState(wsManager.connectionState === "open" ? "open" : "connecting");
           recordSuccess(at);
         },
         onPollError: (message) => {
@@ -147,12 +173,19 @@ export function MarketDataProvider({ children }: { children: ReactNode }) {
     return stop;
   }, [recordSuccess, recordFailure]);
 
+  // Shared-socket state for the status UI (updates on ticks + failures).
+  useEffect(() => {
+    setWsState(wsManager.connectionState);
+    const id = window.setInterval(() => setWsState(wsManager.connectionState), 5000);
+    return () => window.clearInterval(id);
+  }, [lastSuccessAt, consecutiveFailures]);
+
   const stale = useMemo(
     () => (updatedAt === 0 ? false : isMarketsStale(updatedAt)),
     [updatedAt],
   );
 
-  const connection = useMemo<ConnectionState>(
+  const baseConnection = useMemo<ConnectionState>(
     () =>
       deriveConnection({
         lastSuccessAt,
@@ -163,11 +196,34 @@ export function MarketDataProvider({ children }: { children: ReactNode }) {
     [lastSuccessAt, consecutiveFailures, markets.length],
   );
 
+  // RECONNECTING refines CONNECTING while the shared socket dials;
+  // a recent 429 overrides everything with RATE LIMITED + countdown.
+  const connection = useMemo<ConnectionState>(() => {
+    if (baseConnection === "CONNECTING" && wsState === "connecting") return "RECONNECTING";
+    return applyRateLimitOverride(baseConnection, rateLimitedAt).state;
+  }, [baseConnection, wsState, rateLimitedAt, lastSuccessAt]);
+
+  const rateLimit = useMemo(
+    () => applyRateLimitOverride(baseConnection, rateLimitedAt).view,
+    [baseConnection, rateLimitedAt, lastSuccessAt],
+  );
+
+  // Legacy vocabulary for existing pages (signal math untouched).
+  const legacyStatus = useMemo<MarketStatus>(() => {
+    if (status === "live" && stale) return "stale";
+    if (connection === "RATE_LIMITED") return "stale";
+    if (connection === "RECONNECTING") return "loading";
+    return status;
+  }, [status, stale, connection]);
+
   const value = useMemo<MarketDataValue>(
     () => ({
       markets,
-      status: status === "live" && stale ? "stale" : status,
+      status: legacyStatus,
       connection,
+      rateLimit,
+      rateLimitedAt,
+      wsState,
       error,
       updatedAt,
       lastSuccessAt,
@@ -175,7 +231,7 @@ export function MarketDataProvider({ children }: { children: ReactNode }) {
       stale,
       refresh,
     }),
-    [markets, status, connection, error, updatedAt, lastSuccessAt, consecutiveFailures, stale, refresh],
+    [markets, legacyStatus, connection, rateLimit, rateLimitedAt, wsState, error, updatedAt, lastSuccessAt, consecutiveFailures, stale, refresh],
   );
 
   return <MarketDataContext.Provider value={value}>{children}</MarketDataContext.Provider>;

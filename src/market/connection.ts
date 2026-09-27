@@ -6,7 +6,13 @@
  * mocked clocks; no network access here.
  */
 
-export type ConnectionState = "CONNECTING" | "ONLINE" | "DEGRADED" | "OFFLINE";
+export type ConnectionState =
+  | "CONNECTING"
+  | "RECONNECTING"
+  | "ONLINE"
+  | "DEGRADED"
+  | "RATE_LIMITED"
+  | "OFFLINE";
 
 export interface ConnectionInput {
   /** Epoch ms of the last successfully received payload (0 = never). */
@@ -73,6 +79,56 @@ export const CONNECTION_META: Record<
 > = {
   ONLINE: { dot: "bg-emerald-400", label: "Online", emoji: "🟢" },
   CONNECTING: { dot: "bg-amber-300", label: "Connecting…", emoji: "🟡" },
+  RECONNECTING: { dot: "bg-amber-300", label: "Reconnecting…", emoji: "🟡" },
   DEGRADED: { dot: "bg-orange-400", label: "Degraded", emoji: "🟠" },
+  RATE_LIMITED: { dot: "bg-orange-400", label: "Rate limited", emoji: "🟠" },
   OFFLINE: { dot: "bg-rose-500", label: "Offline", emoji: "🔴" },
 };
+
+/** How long a 429 keeps the RATE LIMITED badge up (covers the backoff). */
+export const RATE_LIMITED_BADGE_MS = 12_000;
+
+/** Map the 6-state connection onto the legacy LiveBadge status vocabulary. */
+export function connectionToLegacyStatus(
+  state: ConnectionState,
+): "loading" | "live" | "stale" | "error" {
+  switch (state) {
+    case "ONLINE":
+      return "live";
+    case "CONNECTING":
+    case "RECONNECTING":
+      return "loading";
+    case "DEGRADED":
+    case "RATE_LIMITED":
+      return "stale";
+    case "OFFLINE":
+      return "error";
+  }
+}
+
+export interface RateLimitView {
+  limited: boolean;
+  /** Seconds until the badge clears (0 when not limited). */
+  retryInSec: number;
+}
+
+/**
+ * Overlay for the derived state: a recent 429 forces RATE LIMITED with a
+ * user-facing countdown (no stack traces). Pure + unit-tested.
+ */
+export function applyRateLimitOverride(
+  state: ConnectionState,
+  rateLimitedAt: number,
+  now = Date.now(),
+): { state: ConnectionState; view: RateLimitView } {
+  if (rateLimitedAt > 0 && now - rateLimitedAt < RATE_LIMITED_BADGE_MS) {
+    return {
+      state: "RATE_LIMITED",
+      view: {
+        limited: true,
+        retryInSec: Math.max(1, Math.ceil((RATE_LIMITED_BADGE_MS - (now - rateLimitedAt)) / 1000)),
+      },
+    };
+  }
+  return { state, view: { limited: false, retryInSec: 0 } };
+}

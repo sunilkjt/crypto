@@ -1,7 +1,7 @@
 import type { Candle, Timeframe } from "../market/hyperliquid/types";
 import { getCandles } from "../market/hyperliquid/candles";
 import { timeframeToMs } from "../market/hyperliquid/timeframes";
-import { postInfo } from "../market/hyperliquid/client";
+import { postInfoWithRetry } from "../market/hyperliquid/client";
 import { HyperliquidError } from "../market/hyperliquid/types";
 import type { HistoricalSet } from "./types";
 
@@ -75,7 +75,7 @@ export async function fetchFundingHistory(
   endTime: number,
 ): Promise<{ timestamp: number; rate: number }[]> {
   try {
-    const payload = await postInfo(
+    const payload = await postInfoWithRetry(
       { type: "fundingHistory", coin: symbol.toUpperCase(), startTime, endTime },
       { timeoutMs: 12_000 },
     );

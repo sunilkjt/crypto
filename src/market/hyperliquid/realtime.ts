@@ -1,4 +1,5 @@
 import { wsManager } from "../ws";
+import { onVisible, pollAllowed } from "../visibility";
 import { getAllMids } from "./index";
 
 /**
@@ -40,6 +41,8 @@ export function startMarketRealtime(
 
   const timer = window.setInterval(async () => {
     if (stopped) return;
+    // Hidden tabs skip polling; the socket keeps pushing either way.
+    if (!pollAllowed()) return;
     if (Date.now() - lastWsTick < pollMs) return;
     try {
       const { mids, updatedAt } = await getAllMids();
@@ -55,9 +58,15 @@ export function startMarketRealtime(
     }
   }, pollMs);
 
+  // Returning to the tab nudges one immediate freshness check.
+  const offVisible = onVisible(() => {
+    lastWsTick = 0;
+  });
+
   return () => {
     stopped = true;
     window.clearInterval(timer);
+    offVisible();
     unsub();
   };
 }

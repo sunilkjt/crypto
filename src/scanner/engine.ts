@@ -52,7 +52,11 @@ export interface ScanOptions {
 }
 
 const SCAN_TIMEFRAMES: Timeframe[] = ["4h", "1h", "15m", "5m"];
-const DEFAULT_CONCURRENCY = 8;
+// Six parallel coin batches (≈24 REST calls in flight at most, usually far
+// fewer thanks to the shared candle cache). Eight-plus coincided with the
+// snapshot fan-out often enough to trip 429s — fetch behavior only,
+// scoring math untouched.
+const DEFAULT_CONCURRENCY = 6;
 
 async function boundedAll<T>(tasks: (() => Promise<T>)[], limit: number): Promise<T[]> {
   const out: T[] = new Array(tasks.length);

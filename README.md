@@ -1,8 +1,7 @@
-# CryptoIn AI Signal — Phase 7 (Real-Time Monitoring + Alerts) ✅
+# CryptoIn AI Signal — Phase 8 (Rate Limits + Performance) ✅
 
-Monitoring and alerts on the deterministic engine. **No exchange orders, no
-private keys, no automatic real trading — alerting is in-app, browser, sound,
-or future server-side providers only.**
+Same signals, cheaper data access. **Fetch-layer only: no indicator, scoring,
+weight, plan, or design changes. Ranks mean exactly what they meant before.**
 
 Tech: React + TypeScript + Vite + Tailwind CSS v4 + Recharts + React Router + Lucide + Vitest.
 
@@ -157,7 +156,34 @@ only endpoint URLs (see `.env.example`); audit grep clean.
 - AI/news failures: monitor never calls them; coin sections degrade to their
   honest unavailable states while alerts continue.
 
-- [x] Tests (mocked, 185 passing) + `npm run build` green
+- [x] Tests (mocked, 185 passing) + `npm run build` green (Phase 7 baseline)
+
+## Phase 8 completed — rate limits + performance (fetch layer only)
+
+Why 429s happened (audited, documented in code): the scanner fanned out
+~160 candle POSTs per run at concurrency 8 while `getMarkets` fired ~11
+parallel per-dex POSTs with no bound; every 30s snapshot poll bypassed the
+cache; candle cache keys embedded `Date.now()` so entries NEVER hit across
+components; every candle sub re-sent on connect (double-subscribe); hidden
+tabs kept polling; and no retry logic existed despite the error text.
+
+- Bounded everything: per-dex fan-out capped at 4 (order-preserving),
+  scanner concurrency 8 → 6, candle subs send once (live socket or
+  reconnect-replay, never both).
+- Shared cache that actually hits: timeframe-grid-aligned candle keys
+  (Scanner/Chart/Signal/Coin/History share one entry), TTLs 45s markets /
+  30s candles, hit/miss counters; concurrent duplicates still coalesce.
+- Real retry: `postInfoWithRetry` — exponential backoff (500ms×2, ±25%
+  jitter, 8s ceiling, 4 retries max) for network/timeout/429/5xx only;
+  missing-market/candles, cancellations and malformed shapes never retry.
+- Visibility: hidden tabs skip all polling loops and resume with one
+  refresh on return; the socket (cheap server push) stays connected.
+- Status: 🟢 LIVE / 🟡 RECONNECTING / 🟠 RATE LIMITED (with retry countdown)
+  / 🔴 OFFLINE alongside the existing states; no stack traces for users.
+- Dev-only diagnostics panel (footer, `import.meta.env.DEV`): REST/min,
+  sockets, cache hits/misses/rate, 429 count, subscriptions.
+
+- [x] Tests (mocked, 211 passing) + `npm run build` green
 
 ## Hyperliquid data sources (public only)
 
@@ -184,26 +210,31 @@ WebSocket `wss://api.hyperliquid.xyz/ws`:
 ## Market-data architecture
 
 ```
-src/market/
+src/market/             # store (cached polls, 429 + socket states),
+                      # visibility (hidden-tab gating), diagnostics
+                      # (dev counters), hyperliquid/{client+retry, cache
+                      # keys, bounded fan-out, single shared ws}
   hyperliquid/
     types.ts          # Market/Candle/Ticker/Funding/OpenInterest/MarketData/Timeframe + raw shapes + HyperliquidError
-    client.ts         # postInfo() — timeout, rate-limit, network/invalid-response mapping
+    client.ts         # postInfo() + postInfoWithRetry() — backoff/jitter/caps
     timeframes.ts     # SUPPORTED_TIMEFRAMES, toHyperliquidInterval, timeframeToMs, getCandleWindow
     markets.ts        # normalizeMetaAndAssetCtxs, normalizePerpDexs, mergeDexMarkets, normalizeAllMids, mergeLivePrices, findMarket
     candles.ts        # normalizeCandle(s), getCandles(), getRecentCandles(), getCachedCandles()
     funding.ts        # toFunding, formatFundingRate
     openInterest.ts   # toOpenInterest, formatOpenInterestNotional
-    index.ts          # getMarkets() (all dexes), getAllMids(), getCachedCandles()
-    realtime.ts       # startMarketRealtime() — WS first, HTTPS polling fallback
-    __tests__/       # markets/candles/timeframes/client (mocked fetch)
-  cache.ts            # cached(key, ttl, fetcher) — dedupe, TTL, failure recovery
+    index.ts          # getMarkets() (bounded per-dex fan-out), getAllMids(), getCachedCandles() (grid keys)
+    realtime.ts       # startMarketRealtime() — WS first, HTTPS polling fallback, visibility-gated
+    __tests__/       # markets/candles/timeframes/client/retry/cachekeys (mocked fetch)
+  cache.ts            # cached(key, ttl, fetcher) — dedupe, TTL, hit/miss stats
   persist.ts          # localStorage last-good snapshot — instant stale paint offline
-  connection.ts       # CONNECTING/ONLINE/DEGRADED/OFFLINE machine + last-update labels
+  connection.ts       # 6-state machine + RATE LIMITED override + legacy mapping
+  visibility.ts       # hidden-tab polling gates + return-to-tab refresh
+  diagnostics.ts      # dev-only traffic counters (no production UI)
   freshness.ts        # FRESHNESS thresholds, isStale, formatLastUpdated
-  ws.ts               # singleton WsManager — 1 socket, multiplexed subs, backoff, heartbeat
-  store.tsx           # MarketDataProvider + useMarkets() — snapshot poll 30s, mids fallback 15s
-  useCandles.ts       # useCandles(symbol, tf) — REST + WS merge + 30s fallback
-  __tests__/          # freshness, cache, persist, connection
+  ws.ts               # singleton WsManager — 1 socket, multiplexed subs, backoff, heartbeat, socket state
+  store.tsx           # MarketDataProvider + useMarkets() — cached 30s poll, 429/socket states, visibility
+  useCandles.ts       # useCandles(symbol, tf) — REST + WS merge + visibility-gated fallback
+  __tests__/          # freshness, cache, persist, connection, visibility, diagnostics, ws, shared, rateLimit
 src/components/
   LiveBadge.tsx       # legacy data-availability badges (kept for page headers)
   ConnectionBadge.tsx # 🟢/🟡/🟠/🔴 badge + last-update line (topbar, Bounce)
@@ -251,7 +282,7 @@ Rules: UI never touches `fetch` or raw shapes — only `useMarkets()`, `useCandl
 
 ```bash
 npm install
-npm test        # vitest run — 185 mocked unit tests
+npm test        # vitest run — 211 mocked unit tests
 npm run build   # tsc -b && vite build
 npm run dev     # http://localhost:5173
 ```

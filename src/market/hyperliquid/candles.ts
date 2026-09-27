@@ -1,4 +1,4 @@
-import { postInfo } from "./client";
+import { postInfoWithRetry } from "./client";
 import { toHyperliquidInterval, getCandleWindow } from "./timeframes";
 import type { Candle, RawCandle, RawWsCandle, Timeframe } from "./types";
 import { HyperliquidError } from "./types";
@@ -85,7 +85,7 @@ export async function getCandles(
   opts?: { timeoutMs?: number; signal?: AbortSignal },
 ): Promise<Candle[]> {
   const coin = symbol.toUpperCase();
-  const payload = await postInfo(
+  const payload = await postInfoWithRetry(
     {
       type: "candleSnapshot",
       req: {

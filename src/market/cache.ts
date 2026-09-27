@@ -1,7 +1,15 @@
 /**
  * Lightweight in-memory cache: dedupes concurrent requests,
  * expires stale entries, evicts on capacity. No external DB.
+ *
+ * AUDIT NOTE — this layer ALREADY coalesced simultaneous duplicates, but
+ * candle callers passed Date.now()-derived windows, so every call had a
+ * unique key and nothing ever hit. Callers must use grid-aligned windows
+ * (see candleCacheKey) for cross-component reuse: Scanner → Chart →
+ * Signal engine → Coin Analysis → History all share one entry.
  */
+
+import { recordCacheHit, recordCacheMiss } from "./diagnostics";
 
 interface Entry<T> {
   value: T;
@@ -41,11 +49,14 @@ export async function cached<T>(
   }
   const hit = store.get(key);
   if (hit && "value" in hit && hit.expiresAt > now) {
+    recordCacheHit();
     return hit.value as T;
   }
   if (hit && "promise" in hit && hit.expiresAt > now) {
+    recordCacheHit();
     return hit.promise as Promise<T>;
   }
+  recordCacheMiss();
 
   const promise = fetcher()
     .then((value) => {
@@ -76,6 +87,10 @@ export function clearCache(): void {
 }
 
 export const CACHE_TTL = {
-  marketsMs: 20_000,
-  candlesMs: 15_000,
+  // Snapshot polls run every 30s; 45s TTL keeps them inside the 60s LIVE
+  // window while cutting per-dex refetches by roughly a third.
+  marketsMs: 45_000,
+  // Candles refresh on 30–60s cadences; 30s TTL with grid-aligned keys
+  // lets overlapping consumers share entries instead of refetching.
+  candlesMs: 30_000,
 } as const;

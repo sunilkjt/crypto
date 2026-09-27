@@ -2,12 +2,15 @@ import { WS_URL } from "./hyperliquid/client";
 import { normalizeAllMids } from "./hyperliquid/markets";
 import { normalizeWsCandle } from "./hyperliquid/candles";
 import type { Candle, RawWsCandle } from "./hyperliquid/types";
+import { setActiveSubscriptions, setWsConnections } from "./diagnostics";
 
 /**
  * Singleton WebSocket manager.
- * - One shared connection, never duplicated per component.
+ * - ONE shared connection for the whole app (never per coin/component).
  * - Multiplexes: allMids broadcast + per-coin candle subscriptions.
  * - Exponential-backoff reconnect, heartbeat timeout, clean unsubscribe.
+ * - Page navigation only adds/removes listeners; the socket persists and
+ *   closes itself when the last listener unsubscribes (see maybeIdleClose).
  */
 
 type AllMidsListener = (mids: Record<string, number>) => void;
@@ -37,13 +40,33 @@ class WsManager {
     return this.ws && this.ws.readyState === WebSocket.OPEN ? 1 : 0;
   }
 
+  /** Coarse socket state for status UI: open | connecting | idle. */
+  get connectionState(): "open" | "connecting" | "idle" {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) return "open";
+    if (this.connectPromise !== null || this.reconnectTimer !== null) return "connecting";
+    return "idle";
+  }
+
+  private reportDiagnostics(): void {
+    try {
+      setWsConnections(this.connectionCount);
+      let subs = this.allMidsListeners.size;
+      for (const sub of this.candleSubs.values()) subs += sub.listeners.size;
+      setActiveSubscriptions(subs);
+    } catch {
+      // diagnostics must never break the socket
+    }
+  }
+
   subscribeAllMids(listener: AllMidsListener): () => void {
     this.allMidsListeners.add(listener);
+    this.reportDiagnostics();
     this.ensureConnection().catch(() => {
       // Connection errors surface via onStatus callbacks / polling fallback.
     });
     return () => {
       this.allMidsListeners.delete(listener);
+      this.reportDiagnostics();
       this.maybeIdleClose();
     };
   }
@@ -56,9 +79,15 @@ class WsManager {
       this.candleSubs.set(key, sub);
     }
     sub.listeners.add(listener);
-    this.ensureConnection()
-      .then(() => this.sendSubscribe({ type: "candle", coin: sub.coin, interval: sub.interval }))
-      .catch(() => undefined);
+    this.reportDiagnostics();
+    // Send immediately only on a live socket; otherwise the (re)connect
+    // handler below replays every active subscription exactly once.
+    // (Sending in both places used to duplicate every candle sub.)
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.sendSubscribe({ type: "candle", coin: sub.coin, interval: sub.interval });
+    } else {
+      this.ensureConnection().catch(() => undefined);
+    }
     return () => {
       const s = this.candleSubs.get(key);
       if (!s) return;
@@ -67,6 +96,7 @@ class WsManager {
         this.candleSubs.delete(key);
         this.sendUnsubscribe({ type: "candle", coin: s.coin, interval: s.interval });
       }
+      this.reportDiagnostics();
       this.maybeIdleClose();
     };
   }
@@ -104,6 +134,7 @@ class WsManager {
           settled = true;
           this.reconnectAttempts = 0;
           this.armHeartbeat();
+          this.reportDiagnostics();
           // (Re)send every active subscription on (re)connect.
           this.sendSubscribe({ type: "allMids" });
           for (const sub of this.candleSubs.values()) {
@@ -123,6 +154,7 @@ class WsManager {
           cleanup();
           this.ws = null;
           this.connectPromise = null;
+          this.reportDiagnostics();
           if (!settled) {
             settled = true;
             reject(new Error("Hyperliquid WebSocket closed before open."));

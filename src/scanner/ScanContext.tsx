@@ -12,6 +12,7 @@ import type { Timeframe } from "../market/hyperliquid/types";
 import { useMarkets } from "../market/store";
 import { runFullScan, type ScanSummary } from "./engine";
 import { DEFAULT_ELIGIBILITY } from "./eligibility";
+import { onVisible, pollAllowed } from "../market/visibility";
 import {
   loadJournal,
   nextLifecycleState,
@@ -118,7 +119,7 @@ export function ScanProvider({ children }: { children: ReactNode }) {
       const result = await runFullScan(snapshot, {
         eligibility: { ...DEFAULT_ELIGIBILITY, universeSize },
         setupTimeframe,
-        concurrency: 8,
+        concurrency: 6,
         onProgress: (done, total) => setProgress({ done, total }),
         signal: ctrl.signal,
       });
@@ -240,8 +241,15 @@ export function ScanProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (refreshMs <= 0 || markets.length === 0) return;
-    const id = window.setInterval(() => setRunId((n) => n + 1), refreshMs);
-    return () => window.clearInterval(id);
+    // Hidden tabs pause expensive full-market scans; returning refreshes.
+    const id = window.setInterval(() => {
+      if (pollAllowed()) setRunId((n) => n + 1);
+    }, refreshMs);
+    const offVisible = onVisible(() => setRunId((n) => n + 1));
+    return () => {
+      window.clearInterval(id);
+      offVisible();
+    };
   }, [refreshMs, markets.length]);
 
   useEffect(() => {
